@@ -52,6 +52,40 @@
             </div>
         </div>
     </div>
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Son 10 İşlem <button class="btn btn-sm btn-outline-primary float-end" data-bs-toggle="modal" data-bs-target="#tradesModal">Detay Gör</button></h5>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped" id="recent-trades-table">
+                            <thead><tr><th>Tarih</th><th>Hisse</th><th>İşlem</th><th>Fiyat</th><th>Lot</th><th>Kâr</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Modal for all trades -->
+<div class="modal fade" id="tradesModal" tabindex="-1" aria-labelledby="tradesModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="tradesModalLabel">Son 100 İşlem</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-striped" id="all-trades-table">
+                <thead><tr><th>Tarih</th><th>Hisse</th><th>İşlem</th><th>Fiyat</th><th>Lot</th><th>Kâr</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 <script>
 function fetchPortfolio() {
@@ -69,6 +103,52 @@ function fetchPerformance() {
             document.getElementById('total-profit').textContent = data.total_profit.toLocaleString('tr-TR', {maximumFractionDigits:2});
             document.getElementById('win-rate').textContent = data.win_rate.toFixed(2);
             document.getElementById('trade-count').textContent = data.trade_count;
+        });
+}
+function fetchRisk() {
+    fetch('/dashboard/api/risk/')
+        .then(r => r.json())
+        .then(data => {
+            const labels = data.distribution.map(x => x.ticker);
+            const values = data.distribution.map(x => x.amount);
+            riskChart.data.labels = labels;
+            riskChart.data.datasets[0].data = values;
+            riskChart.update();
+        });
+}
+function fetchPortfolioSeries() {
+    fetch('/dashboard/api/portfolio_series/')
+        .then(r => r.json())
+        .then(data => {
+            const labels = data.series.map(x => x.date);
+            const values = data.series.map(x => x.total_value);
+            portfolioChart.data.labels = labels;
+            portfolioChart.data.datasets[0].data = values;
+            portfolioChart.update();
+        });
+}
+function fetchRecentTrades() {
+    fetch('/dashboard/api/recent_trades/')
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.querySelector('#recent-trades-table tbody');
+            tbody.innerHTML = '';
+            data.trades.forEach(tr => {
+                const row = `<tr><td>${tr.date}</td><td>${tr.ticker}</td><td>${tr.action}</td><td>${tr.price.toFixed(2)}</td><td>${tr.amount}</td><td>${tr.profit.toFixed(2)}</td></tr>`;
+                tbody.insertAdjacentHTML('beforeend', row);
+            });
+        });
+}
+function fetchAllTrades() {
+    fetch('/dashboard/api/all_trades/')
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.querySelector('#all-trades-table tbody');
+            tbody.innerHTML = '';
+            data.trades.forEach(tr => {
+                const row = `<tr><td>${tr.date}</td><td>${tr.ticker}</td><td>${tr.action}</td><td>${tr.price.toFixed(2)}</td><td>${tr.amount}</td><td>${tr.profit.toFixed(2)}</td></tr>`;
+                tbody.insertAdjacentHTML('beforeend', row);
+            });
         });
 }
 // Placeholder: Risk ve portföy zaman serisi için örnek veri
@@ -90,8 +170,16 @@ const portfolioChart = new Chart(document.getElementById('portfolioChart').getCo
 });
 fetchPortfolio();
 fetchPerformance();
+fetchRisk();
+fetchPortfolioSeries();
+document.getElementById('tradesModal').addEventListener('show.bs.modal', fetchAllTrades);
+fetchRecentTrades();
 setInterval(fetchPortfolio, 5000);
 setInterval(fetchPerformance, 5000);
+setInterval(fetchRisk, 10000);
+setInterval(fetchPortfolioSeries, 10000);
+setInterval(fetchRecentTrades, 5000);
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html> 

@@ -1,3 +1,6 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.dirname(__file__) + '/../'))
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -23,8 +26,14 @@ if df is None or df.empty:
 print(df.head())
 print("Veri satırı sayısı:", len(df))
 
-df["RSI"] = calculate_rsi(df["Close"])
-df["MACD"], df["Signal"] = calculate_macd(df["Close"])
+# Eğer df["Close"] bir DataFrame ise, ilk sütunu al
+if isinstance(df["Close"], pd.DataFrame):
+    close = df["Close"].iloc[:, 0]
+else:
+    close = df["Close"]
+
+df["RSI"] = calculate_rsi(close)
+df["MACD"], df["Signal"] = calculate_macd(close)
 df["MA200"] = df["Close"].rolling(window=200).mean()
 
 # Mock macro data for demonstration (in real use, pull from macro_signals)
@@ -50,17 +59,23 @@ create_db_schema()
 for i in range(200, len(df), 5):
     row = df.iloc[i]
     indicators = {
-        "RSI": float(row["RSI"]),
-        "MACD": float(row["MACD"] - row["Signal"])
+        "RSI": float(row["RSI"].iloc[0]) if hasattr(row["RSI"], 'iloc') else float(row["RSI"]),
+        "MACD": float(row["MACD"].iloc[0]) if hasattr(row["MACD"], 'iloc') else float(row["MACD"]),
+        "Signal": float(row["Signal"].iloc[0]) if hasattr(row["Signal"], 'iloc') else float(row["Signal"]),
+        "Close": float(row["Close"].iloc[0]) if hasattr(row["Close"], 'iloc') else float(row["Close"]),
+        "MA200": float(row["MA200"].iloc[0]) if hasattr(row["MA200"], 'iloc') else float(row["MA200"]),
+        "M2_GROWTH": float(row["M2_GROWTH"].iloc[0]) if hasattr(row["M2_GROWTH"], 'iloc') else float(row["M2_GROWTH"]),
+        "FED_RATE": float(row["FED_RATE"].iloc[0]) if hasattr(row["FED_RATE"], 'iloc') else float(row["FED_RATE"]),
+        "PREV_FED_RATE": float(row["PREV_FED_RATE"].iloc[0]) if hasattr(row["PREV_FED_RATE"], 'iloc') else float(row["PREV_FED_RATE"])
     }
     score = calculate_decision_score(indicators, {"RSI": 1, "MACD": 1}, news_score=0)
-    price = float(row["Close"])
+    price = float(row["Close"].iloc[0]) if hasattr(row["Close"], 'iloc') else float(row["Close"])
     date = row.name
-    ma200 = float(row["MA200"])
-    ma50 = float(df.iloc[i]["Close"]) if i >= 50 else price  # fallback
-    m2_growth = float(row["M2_GROWTH"])
-    fed_rate = float(row["FED_RATE"])
-    prev_fed_rate = float(row["PREV_FED_RATE"])
+    ma200 = float(row["MA200"].iloc[0]) if hasattr(row["MA200"], 'iloc') else float(row["MA200"])
+    ma50 = float(df.iloc[i]["Close"].iloc[0]) if hasattr(df.iloc[i]["Close"], 'iloc') else float(df.iloc[i]["Close"]) if i >= 50 else price
+    m2_growth = float(row["M2_GROWTH"].iloc[0]) if hasattr(row["M2_GROWTH"], 'iloc') else float(row["M2_GROWTH"])
+    fed_rate = float(row["FED_RATE"].iloc[0]) if hasattr(row["FED_RATE"], 'iloc') else float(row["FED_RATE"])
+    prev_fed_rate = float(row["PREV_FED_RATE"].iloc[0]) if hasattr(row["PREV_FED_RATE"], 'iloc') else float(row["PREV_FED_RATE"])
 
     # Teknik kırılım ve destek/direnç (örnek, gerçek fonksiyonlarla değiştirilebilir)
     direnc_kirildi = price > ma200 * 1.01
@@ -69,31 +84,37 @@ for i in range(200, len(df), 5):
     faiz_dusuyor = fed_rate < prev_fed_rate
 
     # Ağırlıklı alım skoru ve kararı
-    alim_skoru_agirlikli = alim_karari_ver_agirlikli(
-        float(row["RSI"]), float(row["MACD"]), float(row["Signal"]), ma50, ma200, agirliklar
+    skor, confidence = alim_karari_ver_agirlikli(
+        float(row["RSI"].iloc[0]) if hasattr(row["RSI"], 'iloc') else float(row["RSI"]),
+        float(row["MACD"].iloc[0]) if hasattr(row["MACD"], 'iloc') else float(row["MACD"]),
+        float(row["Signal"].iloc[0]) if hasattr(row["Signal"], 'iloc') else float(row["Signal"]),
+        ma50, ma200, agirliklar
     )
-    alim_var = alim_skoru_agirlikli > 0.5  # Eşik: 0.5 (isteğe göre ayarlanabilir)
+    alim_var = skor > 0.5  # Eşik: 0.5 (isteğe göre ayarlanabilir)
 
     # Satış skoru (profesyonel mantık)
     sell_score = calculate_sell_score(
-        float(row["RSI"]), float(row["MACD"]), float(row["Signal"]), price, ma200, m2_growth, fed_rate, prev_fed_rate
+        float(row["RSI"].iloc[0]) if hasattr(row["RSI"], 'iloc') else float(row["RSI"]),
+        float(row["MACD"].iloc[0]) if hasattr(row["MACD"], 'iloc') else float(row["MACD"]),
+        float(row["Signal"].iloc[0]) if hasattr(row["Signal"], 'iloc') else float(row["Signal"]),
+        price, ma200, m2_growth, fed_rate, prev_fed_rate
     )
     current_loss = (buy_price - price) / buy_price if stock > 0 else 0
 
-    print(f"{date.date()} | Score: {score:.2f} | SellScore: {sell_score} | AlimSkoruAgirlikli: {alim_skoru_agirlikli:.2f} | Agirliklar: {agirliklar} | Stock: {stock} | Cash: {cash}")
+    print(f"{date.date()} | Score: {score:.2f} | SellScore: {sell_score} | AlimSkoruAgirlikli: {skor:.2f} | Agirliklar: {agirliklar} | Stock: {stock} | Cash: {cash}")
 
     # AL Kararı (ağırlıklı, öğrenen)
     if alim_var and cash >= price:
-        cash, stock, miktar = uygula_alim_karari(alim_var, alim_skoru_agirlikli, cash, price, int(stock))
+        cash, stock, miktar = uygula_alim_karari(alim_var, skor, cash, price, int(stock))
         if miktar > 0:
             buy_price = float(price)
-            trade_log.append({"date": date, "action": "BUY", "price": price, "amount": miktar, "alim_skoru_agirlikli": alim_skoru_agirlikli, "agirliklar": agirliklar})
-            print(f"{date.date()} ALIM: {price} x {miktar} (AlimSkoruAgirlikli: {alim_skoru_agirlikli:.2f})")
+            trade_log.append({"date": date, "action": "BUY", "price": price, "amount": miktar, "alim_skoru_agirlikli": skor, "agirliklar": agirliklar})
+            print(f"{date.date()} ALIM: {price} x {miktar} (AlimSkoruAgirlikli: {skor:.2f})")
             # Learning log: 5 gün sonra fiyatı kaydet
             if i + 5 < len(df):
-                sonraki_fiyat = df.iloc[i + 5]["Close"]
+                sonraki_fiyat = df.iloc[i + 5]["Close"].iloc[0] if hasattr(df.iloc[i + 5]["Close"], 'iloc') else float(df.iloc[i + 5]["Close"])
                 ma_durum = int(ma50 > ma200)
-                log_learning_data(date.date(), "ALIM", price, row["RSI"], row["MACD"] - row["Signal"], ma_durum, sonraki_fiyat)
+                log_learning_data(date.date(), "ALIM", price, row["RSI"].iloc[0] if hasattr(row["RSI"], 'iloc') else float(row["RSI"]), row["MACD"].iloc[0] - row["Signal"].iloc[0], ma_durum, sonraki_fiyat)
 
     # SAT Kararı (profesyonel mantık)
     elif (sell_score >= 3 or (sell_score == 2 and current_loss > 0) or current_loss >= 0.10) and stock > 0:
@@ -191,19 +212,19 @@ for idx, date in enumerate(common_index):
         if date not in df.index:
             continue
         row = df.loc[date]
-        price = float(row['Close'])
-        ma50 = float(row['MA50'])
-        ma200 = float(row['MA200'])
-        rsi = float(row['RSI'])
-        macd = float(row['MACD'])
-        signal = float(row['Signal'])
+        price = float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close'])
+        ma50 = float(row['MA50'].iloc[0]) if hasattr(row['MA50'], 'iloc') else float(row['MA50'])
+        ma200 = float(row['MA200'].iloc[0]) if hasattr(row['MA200'], 'iloc') else float(row['MA200'])
+        rsi = float(row['RSI'].iloc[0]) if hasattr(row['RSI'], 'iloc') else float(row['RSI'])
+        macd = float(row['MACD'].iloc[0]) if hasattr(row['MACD'], 'iloc') else float(row['MACD'])
+        signal = float(row['Signal'].iloc[0]) if hasattr(row['Signal'], 'iloc') else float(row['Signal'])
         stock = portfolio[ticker]['stock']
         buy_price = portfolio[ticker]['buy_price']
-        bollinger_high = df['Close'].rolling(window=20).mean().loc[date] + 2 * df['Close'].rolling(window=20).std().loc[date]
-        bollinger_low = df['Close'].rolling(window=20).mean().loc[date] - 2 * df['Close'].rolling(window=20).std().loc[date]
-        volume = float(row['Volume'])
+        bollinger_high = df['Close'].rolling(window=20).mean().loc[date].iloc[0] + 2 * df['Close'].rolling(window=20).std().loc[date].iloc[0]
+        bollinger_low = df['Close'].rolling(window=20).mean().loc[date].iloc[0] - 2 * df['Close'].rolling(window=20).std().loc[date].iloc[0]
+        volume = float(row['Volume'].iloc[0]) if hasattr(row['Volume'], 'iloc') else float(row['Volume'])
         prev_idx = df.index.get_loc(date) - 1
-        prev_volume = float(df['Volume'].iloc[prev_idx]) if prev_idx >= 0 else volume
+        prev_volume = float(df['Volume'].iloc[prev_idx].iloc[0]) if hasattr(df['Volume'].iloc[prev_idx], 'iloc') else float(df['Volume'].iloc[prev_idx]) if prev_idx >= 0 else volume
         skor = advanced_karar_skora_cevir(
             rsi, macd, signal, ma50, ma200, price, bollinger_high, bollinger_low, volume, prev_volume, agirliklar
         )
@@ -220,7 +241,7 @@ for idx, date in enumerate(common_index):
         threshold_used = 'max'
     print(f"Hafta {idx}: Kullanılan eşik: {threshold_used}, Seçilen hisseler: {[t[0] for t in top_to_buy]}")
     for ticker, skor, price, ma50, ma200, rsi, macd, signal, stock, buy_price, row in ticker_scores:
-        atr = row['ATR'] if 'ATR' in row else 0
+        atr = row['ATR'].iloc[0] if 'ATR' in row else 0
         alim_skoru, confidence = alim_karari_ver_agirlikli(rsi, macd, signal, ma50, ma200, agirliklar)
         # Göstergeleri kaydet
         save_indicator(ticker, 'RSI', rsi, date)
@@ -244,7 +265,7 @@ for idx, date in enumerate(common_index):
                 save_trade(ticker, 'BUY', price, int(miktar), '', 0, str(row.name))
                 print(f"{row.name.date()} {ticker} ALIM: {price} x {miktar} (Conf: {confidence}) SL: {stop_loss:.2f} TP: {take_profit:.2f}")
                 if idx + 1 < len(df):
-                    sonraki_fiyat = df.iloc[idx + 1]['Close']
+                    sonraki_fiyat = df.iloc[idx + 1]['Close'].iloc[0] if hasattr(df.iloc[idx + 1]['Close'], 'iloc') else float(df.iloc[idx + 1]['Close'])
                     ma_durum = int(ma50 > ma200)
                     log_learning_data(row.name.date(), f"ALIM-{ticker}", price, rsi, macd - signal, ma_durum, sonraki_fiyat)
         elif (sell_score >= 2 or current_loss >= 0.05) and stock > 0:
@@ -276,17 +297,17 @@ for idx, date in enumerate(common_index):
     # Her 20 adımda (haftada bir) otomatik rebalancing uygula
     if idx > 0 and idx % 20 == 0:
         # Fiyat ve performans verilerini hazırla
-        price_data = {t: all_data[t].loc[date]['Close'] for t in nasdaq_tickers if date in all_data[t].index}
+        price_data = {t: all_data[t].loc[date]['Close'].iloc[0] if hasattr(all_data[t]['Close'], 'iloc') else float(all_data[t]['Close']) for t in nasdaq_tickers if date in all_data[t].index}
         # Basit performans: ilk fiyata göre getiri
-        performance_data = {t: (all_data[t].loc[date]['Close'] / all_data[t]['Close'].iloc[0]) - 1 for t in nasdaq_tickers if date in all_data[t].index}
+        performance_data = {t: (all_data[t].loc[date]['Close'].iloc[0] if hasattr(all_data[t]['Close'], 'iloc') else float(all_data[t]['Close']) / all_data[t]['Close'].iloc[0]) - 1 for t in nasdaq_tickers if date in all_data[t].index}
         portfolio = auto_rebalance_portfolio(portfolio, price_data, performance_data)
         print(f"Rebalancing sonrası portföy: { {k: v['stock'] for k, v in portfolio.items()} }")
     # Portföy snapshot'ı kaydet
-    total_value = cash + sum(portfolio[t]['stock'] * all_data[t].loc[date]['Close'] for t in nasdaq_tickers if date in all_data[t].index)
+    total_value = cash + sum(portfolio[t]['stock'] * all_data[t].loc[date]['Close'].iloc[0] if hasattr(all_data[t]['Close'], 'iloc') else float(all_data[t]['Close']) for t in nasdaq_tickers if date in all_data[t].index)
     save_portfolio_snapshot(str(date), total_value, cash, str({k: v['stock'] for k, v in portfolio.items()}))
 
 # Simülasyon sonunda risk dağılımı görselleştir
-price_data = {t: all_data[t]['Close'].iloc[-1] for t in nasdaq_tickers}
+price_data = {t: all_data[t]['Close'].iloc[-1].iloc[0] if hasattr(all_data[t]['Close'], 'iloc') else float(all_data[t]['Close'].iloc[-1]) for t in nasdaq_tickers}
 plot_portfolio_risk(portfolio, price_data)
 
 # Tüm simülasyonun grafiği (tarih ekseninde)
@@ -317,7 +338,7 @@ def single_stock_backtest(ticker):
     portfolio_value = []
     for i in range(200, len(df), 5):
         row = df.iloc[i]
-        price = float(row['Close'])
+        price = float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close'])
         # ... (karar motoru, al/sat, portföy güncelleme)
         total_value = cash + stock * price
         portfolio_value.append(total_value)
