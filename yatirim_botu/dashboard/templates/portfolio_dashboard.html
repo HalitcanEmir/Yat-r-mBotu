@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bot Portföyü</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial; background-color: #0f0f0f; color: #f0f0f0; padding: 20px; }
+    .panel { border: 1px solid #444; padding: 20px; margin-bottom: 20px; border-radius: 10px; }
+  </style>
+</head>
+<body>
+
+<h2>📊 Yatırım Botu Portföyü</h2>
+
+<div class="panel">
+  <h3>📄 Genel Bilgiler</h3>
+  <p><b>Toplam Nakit:</b> <span id="cash"></span> USD</p>
+</div>
+
+<div class="panel">
+  <h3>📦 Pozisyonlar</h3>
+  <table border="1" cellpadding="10">
+    <thead>
+      <tr><th>Hisse</th><th>Alış</th><th>Güncel</th><th>Adet</th><th>Kar/Zarar</th></tr>
+    </thead>
+    <tbody id="positions_table"></tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h3>📈 Portföy Dağılımı</h3>
+  <canvas id="portfolioChart" width="400" height="200"></canvas>
+</div>
+
+<div class="panel">
+  <h3>📊 Bot Performansı</h3>
+  <div style="display: flex; gap: 20px;">
+    <div>
+      <p><b>Toplam Getiri:</b> <span id="total_return"></span></p>
+      <p><b>Sharpe Oranı:</b> <span id="sharpe"></span></p>
+      <p><b>Başarı Oranı:</b> <span id="success_rate"></span></p>
+      <p><b>Max Drawdown:</b> <span id="drawdown"></span></p>
+    </div>
+    <div>
+      <canvas id="returnChart" width="300" height="200"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+fetch('/get_portfolio')
+  .then(res => res.json())
+  .then(data => {
+    document.getElementById("cash").innerText = data.cash.toFixed(2);
+
+    let tbody = "";
+    let labels = [], values = [];
+
+    data.positions.forEach(pos => {
+      let profit = (pos.current_price - pos.buy_price) * pos.quantity;
+      tbody += `<tr>
+        <td>${pos.ticker}</td>
+        <td>${pos.buy_price.toFixed(2)}</td>
+        <td>${pos.current_price.toFixed(2)}</td>
+        <td>${pos.quantity}</td>
+        <td style="color:${profit>=0 ? 'lightgreen':'red'}">${profit.toFixed(2)} USD</td>
+      </tr>`;
+
+      labels.push(pos.ticker);
+      values.push(pos.current_price * pos.quantity);
+    });
+
+    document.getElementById("positions_table").innerHTML = tbody;
+
+    new Chart(document.getElementById("portfolioChart"), {
+      type: 'pie',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: ['#4bc0c0', '#ff9f40', '#9966ff']
+        }]
+      }
+    });
+  });
+
+fetch('/get_performance')
+  .then(res => res.json())
+  .then(data => {
+    document.getElementById("total_return").innerText = (data.total_return * 100).toFixed(2) + " %";
+    document.getElementById("sharpe").innerText = data.sharpe_ratio;
+    document.getElementById("success_rate").innerText = data.success_rate + " %";
+    document.getElementById("drawdown").innerText = data.max_drawdown + " %";
+
+    new Chart(document.getElementById("returnChart"), {
+      type: 'bar',
+      data: {
+        labels: ["Toplam Getiri", "Sharpe", "Başarı %", "Max Drawdown"],
+        datasets: [{
+          label: "Performans",
+          data: [
+            data.total_return * 100,
+            data.sharpe_ratio * 10,  // oranı daha görünür yapmak için
+            data.success_rate,
+            -1 * data.max_drawdown  // pozitif gösterelim
+          ],
+          backgroundColor: ['#4caf50', '#2196f3', '#ff9800', '#f44336']
+        }]
+      }
+    });
+  });
+</script>
+
+</body>
+</html> 

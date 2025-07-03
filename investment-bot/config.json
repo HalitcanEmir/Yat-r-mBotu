@@ -1,0 +1,6 @@
+{
+  "capital": 5000,
+  "max_stock_per_trade": 1000,
+  "trade_time": "15:00",
+  "risk_limit": 0.05
+} 
