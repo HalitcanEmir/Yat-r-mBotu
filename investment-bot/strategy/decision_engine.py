@@ -31,3 +31,61 @@ def calculate_sell_score(rsi, macd, signal, price, ma200, m2_growth, fed_rate, p
     if fed_rate > prev_fed_rate:  # Faiz artıyor
         score += 1
     return score 
+
+def alim_karari_ver(price, rsi, macd, signal, ma50, ma200,
+                    para_arzi_artiyor, faiz_dusuyor,
+                    direnc_kirildi, destekten_sekti):
+    """
+    Profesyonel yatırımcı davranışını taklit eden alım kararı fonksiyonu.
+    Göstergeler ve piyasa sinyallerine göre uygun alım fırsatlarını yakalar.
+    """
+    alim_skoru = 0
+
+    # RSI aşırı satım
+    if rsi < 30:
+        alim_skoru += 1
+
+    # MACD kesişimi
+    if macd > signal:
+        alim_skoru += 1
+
+    # Golden Cross
+    if ma50 > ma200:
+        alim_skoru += 1
+
+    # Teknik formasyonlar
+    if direnc_kirildi:
+        alim_skoru += 1
+    if destekten_sekti:
+        alim_skoru += 1
+
+    # Makro ortam
+    if para_arzi_artiyor:
+        alim_skoru += 1
+    if faiz_dusuyor:
+        alim_skoru += 1
+
+    # Alım kararı – dinamik eşik
+    if alim_skoru >= 4:
+        return True
+    elif alim_skoru >= 3 and para_arzi_artiyor:
+        return True
+    else:
+        return False 
+
+def alim_karari_ver_agirlikli(rsi, macd, signal, ma50, ma200, agirliklar):
+    """
+    Göstergelerin ağırlıklarına göre alım skoru hesaplar. Toplam skor en fazla 1 olur.
+    agirliklar: {'RSI': float, 'MACD': float, 'MA': float}
+    """
+    skor = 0
+    if rsi < 30:
+        skor += agirliklar.get("RSI", 0)
+    if macd > signal:
+        skor += agirliklar.get("MACD", 0)
+    if ma50 > ma200:
+        skor += agirliklar.get("MA", 0)
+    return skor
+# Kullanım:
+# agirliklar = gosterge_agirliklari_ogren()
+# skor = alim_karari_ver_agirlikli(rsi, macd, signal, ma50, ma200, agirliklar) 
