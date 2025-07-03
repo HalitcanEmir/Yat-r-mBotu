@@ -1,0 +1,1 @@
+# TODO: Teknik göstergeler (Keltner, SuperTrend, ATR, EMA, vb.) 

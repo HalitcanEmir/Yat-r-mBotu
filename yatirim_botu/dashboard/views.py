@@ -1,0 +1,1 @@
+# TODO: Django görünümleri burada olacak 

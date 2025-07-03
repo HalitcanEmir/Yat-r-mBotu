@@ -1,0 +1,1 @@
+# TODO: Performans analizi (Sharpe, Sortino, kar/zarar) 

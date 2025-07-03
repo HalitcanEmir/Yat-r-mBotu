@@ -1,0 +1,1 @@
+# TODO: Portföy takibi ve işlem uygulama 

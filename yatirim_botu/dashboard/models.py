@@ -1,0 +1,1 @@
+# TODO: Django modelleri burada olacak 

@@ -1,0 +1,1 @@
+# TODO: Karar algoritması (al/sat/bekle) 

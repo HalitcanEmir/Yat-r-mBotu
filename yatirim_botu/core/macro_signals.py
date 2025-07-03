@@ -1,0 +1,1 @@
+# TODO: Makro sinyaller (faiz, para arzı, VIX vs.) 
