@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Yatırım Botu Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background: #f8f9fa; }
+        .dashboard-card { margin-bottom: 1.5rem; }
+    </style>
+</head>
+<body>
+<div class="container py-4">
+    <h1 class="mb-4">Yatırım Botu Dashboard</h1>
+    <div class="row">
+        <div class="col-md-4 dashboard-card">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Portföy Değeri</h5>
+                    <h2 id="portfolio-value">...</h2>
+                    <div><small>Nakit: <span id="portfolio-cash">...</span></small></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 dashboard-card">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Performans</h5>
+                    <div>Toplam Kâr: <span id="total-profit">...</span></div>
+                    <div>Kazanma Oranı: <span id="win-rate">...</span>%</div>
+                    <div>İşlem Sayısı: <span id="trade-count">...</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 dashboard-card">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Risk Dağılımı</h5>
+                    <canvas id="riskChart" height="120"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Portföy Zaman Serisi</h5>
+                    <canvas id="portfolioChart" height="80"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function fetchPortfolio() {
+    fetch('/dashboard/api/portfolio/')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('portfolio-value').textContent = data.total_value.toLocaleString('tr-TR', {maximumFractionDigits:2});
+            document.getElementById('portfolio-cash').textContent = data.cash.toLocaleString('tr-TR', {maximumFractionDigits:2});
+        });
+}
+function fetchPerformance() {
+    fetch('/dashboard/api/performance/')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('total-profit').textContent = data.total_profit.toLocaleString('tr-TR', {maximumFractionDigits:2});
+            document.getElementById('win-rate').textContent = data.win_rate.toFixed(2);
+            document.getElementById('trade-count').textContent = data.trade_count;
+        });
+}
+// Placeholder: Risk ve portföy zaman serisi için örnek veri
+const riskChart = new Chart(document.getElementById('riskChart').getContext('2d'), {
+    type: 'pie',
+    data: {
+        labels: ['AAPL', 'MSFT', 'GOOGL'],
+        datasets: [{ data: [40, 30, 30], backgroundColor: ['#007bff', '#28a745', '#ffc107'] }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+});
+const portfolioChart = new Chart(document.getElementById('portfolioChart').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: Array.from({length: 30}, (_, i) => `Gün ${i+1}`),
+        datasets: [{ label: 'Portföy Değeri', data: Array.from({length: 30}, () => Math.random()*100000+90000), borderColor: '#007bff', fill: false }]
+    },
+    options: { responsive: true }
+});
+fetchPortfolio();
+fetchPerformance();
+setInterval(fetchPortfolio, 5000);
+setInterval(fetchPerformance, 5000);
+</script>
+</body>
+</html> 

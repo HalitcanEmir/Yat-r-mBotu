@@ -1,5 +1,7 @@
 from django.db import models
 
+# Create your models here.
+
 class Trade(models.Model):
     ticker = models.CharField(max_length=16)
     action = models.CharField(max_length=8)
@@ -38,4 +40,4 @@ class News(models.Model):
     created_at = models.DateTimeField()
 
     def __str__(self):
-        return f"{self.query} ({self.created_at})" 
+        return f"{self.query} ({self.created_at})"
