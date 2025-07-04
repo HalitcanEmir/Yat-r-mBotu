@@ -1,11 +1,12 @@
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
-from .models import Trade, Portfolio, Balance
+from .models import Trade, Portfolio, Balance, PortfolioValueSnapshot
 from django.utils import timezone
 import json
 from django.contrib import messages
 from .utils import get_bist_price
 from django.views import View
+import os
 
 # Create your views here.
 
@@ -23,16 +24,10 @@ def api_portfolio(request):
     return JsonResponse(data)
 
 def api_performance(request):
-    trades = Trade.objects.order_by('-date')[:100]
-    total_profit = sum(t.profit for t in trades)
-    win_trades = [t for t in trades if t.profit > 0]
-    win_rate = len(win_trades) / len(trades) * 100 if trades else 0
-    data = {
-        'total_profit': total_profit,
-        'win_rate': win_rate,
-        'trade_count': len(trades),
-    }
-    return JsonResponse(data)
+    trades = Trade.objects.all()
+    total_profit = sum(t.profit_loss for t in trades)
+    total_trades = trades.count()
+    return JsonResponse({'total_profit': total_profit, 'total_trades': total_trades})
 
 def api_risk_distribution(request):
     latest = PortfolioSnapshot.objects.order_by('-date').first()
@@ -52,16 +47,17 @@ def api_portfolio_timeseries(request):
     return JsonResponse({'series': data})
 
 def api_recent_trades(request):
-    trades = Trade.objects.order_by('-date')[:10]
+    trades = Trade.objects.all().order_by('-date')[:10]
     data = [
         {
-            'ticker': t.ticker,
-            'action': t.action,
+            'symbol': t.symbol,
+            'trade_type': t.trade_type,
+            'quantity': t.quantity,
             'price': t.price,
-            'amount': t.amount,
-            'profit': t.profit,
+            'profit_loss': t.profit_loss,
             'date': t.date.strftime('%Y-%m-%d %H:%M'),
-        } for t in trades
+        }
+        for t in trades
     ]
     return JsonResponse({'trades': data})
 
@@ -135,3 +131,105 @@ class BuySellView(View):
         else:
             messages.error(request, "Geçersiz işlem tipi.")
         return redirect('buy_sell')
+
+# Portföy görüntüleme
+def portfolio_view(request):
+    portfolio = Portfolio.objects.all()
+    portfolio_data = []
+    total_value = 0
+    total_profit = 0
+    for item in portfolio:
+        current_price = get_bist_price(item.symbol)
+        if current_price is None:
+            continue  # Fiyatı çekilemeyen hisseleri atla
+        value = item.quantity * current_price
+        profit = (current_price - item.avg_buy_price) * item.quantity
+        total_value += value
+        total_profit += profit
+        portfolio_data.append({
+            'symbol': item.symbol,
+            'quantity': item.quantity,
+            'avg_buy_price': item.avg_buy_price,
+            'current_price': current_price,
+            'value': value,
+            'profit': profit,
+        })
+    balance = Balance.objects.first()
+    return render(request, 'dashboard/portfolio.html', {
+        'portfolio': portfolio_data,
+        'total_value': total_value,
+        'total_profit': total_profit,
+        'balance': balance.amount if balance else 0,
+    })
+
+# İşlem geçmişi
+def trade_history_view(request):
+    trades = Trade.objects.all().order_by('-date')
+    return render(request, 'dashboard/trade_history.html', {'trades': trades})
+
+# Ana sayfa (dashboard)
+def home_view(request):
+    # Portföy zaman serisi (son 30 snapshot)
+    snapshots = PortfolioValueSnapshot.objects.order_by('-date')[:30][::-1]
+    # Portföy tablosu
+    portfolio = Portfolio.objects.all()
+    portfolio_data = []
+    for item in portfolio:
+        current_price = get_bist_price(item.symbol)
+        if current_price is None:
+            continue  # Fiyatı çekilemeyen hisseleri atla
+        value = item.quantity * current_price
+        profit = (current_price - item.avg_buy_price) * item.quantity
+        portfolio_data.append({
+            'symbol': item.symbol,
+            'quantity': item.quantity,
+            'avg_buy_price': item.avg_buy_price,
+            'current_price': current_price,
+            'value': value,
+            'profit': profit,
+        })
+    # Risk dağılımı (her hissenin portföydeki oranı)
+    total_value = sum(item['value'] for item in portfolio_data)
+    risk_data = [
+        {'symbol': item['symbol'], 'value': item['value'], 'ratio': (item['value']/total_value if total_value > 0 else 0)}
+        for item in portfolio_data
+    ]
+    # İşlem geçmişi (son 20 işlem)
+    trades = Trade.objects.all().order_by('-date')[:20]
+    # Botun düşündükleri: en beğenilen 3 hisse ve yeri değişen hisse
+    top3_scores = []
+    mover_score = None
+    scores_path = os.path.join('dashboard', 'scores.json')
+    if os.path.exists(scores_path):
+        with open(scores_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            scores = data.get('scores', {})
+            prev_scores = data.get('prev_scores', {})
+            # En yüksek toplam skora sahip 3 hisse
+            sorted_scores = sorted(scores.items(), key=lambda x: x[1].get('total_score', 0), reverse=True)
+            top3_scores = [
+                {'symbol': s[0], 'total_score': s[1]['total_score'], 'action': s[1]['action']}
+                for s in sorted_scores[:3]
+            ]
+            # Sıralamada yeri değişen bir hisse bul
+            if prev_scores:
+                prev_sorted = [s[0] for s in sorted(prev_scores.items(), key=lambda x: x[1].get('total_score', 0), reverse=True)]
+                curr_sorted = [s[0] for s in sorted_scores]
+                for i, sym in enumerate(curr_sorted):
+                    if sym in prev_sorted and prev_sorted.index(sym) != i:
+                        mover_score = {
+                            'symbol': sym,
+                            'old_rank': prev_sorted.index(sym)+1,
+                            'new_rank': i+1,
+                            'total_score': scores[sym]['total_score'],
+                            'action': scores[sym]['action']
+                        }
+                        break
+    return render(request, 'dashboard/home.html', {
+        'snapshots': snapshots,
+        'portfolio': portfolio_data,
+        'risk_data': risk_data,
+        'trades': trades,
+        'top3_scores': top3_scores,
+        'mover_score': mover_score,
+    })

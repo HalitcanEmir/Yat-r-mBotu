@@ -60,3 +60,11 @@ class News(models.Model):
 
     def __str__(self):
         return f"{self.query} ({self.created_at})"
+
+class PortfolioValueSnapshot(models.Model):
+    date = models.DateTimeField(default=timezone.now)
+    total_value = models.FloatField()
+    total_profit = models.FloatField()
+
+    def __str__(self):
+        return f"{self.date}: {self.total_value} TL, Kar/Zarar: {self.total_profit} TL"

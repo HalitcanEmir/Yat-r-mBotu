@@ -1,0 +1,177 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">Borsa Simülasyonu - Ana Sayfa</h2>
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Botun Düşündükleri</h5>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <strong>En Beğendiği 3 Hisse:</strong>
+                            <ul class="mb-2">
+                                {% for item in top3_scores %}
+                                <li><b>{{ item.symbol }}</b> — Skor: {{ item.total_score }} — Karar: <span class="badge bg-info text-dark">{{ item.action|upper }}</span></li>
+                                {% empty %}
+                                <li>Veri yok.</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Skor Sıralamasında Yeri Değişen Hisse:</strong>
+                            {% if mover_score %}
+                                <div class="alert alert-warning p-2 mb-0">
+                                    <b>{{ mover_score.symbol }}</b> — Sırası: {{ mover_score.old_rank }} → {{ mover_score.new_rank }}<br>
+                                    Skor: {{ mover_score.total_score }} — Karar: <span class="badge bg-info text-dark">{{ mover_score.action|upper }}</span>
+                                </div>
+                            {% else %}
+                                <span class="text-muted">Bu döngüde yeri değişen hisse yok.</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-8">
+            <h5>Portföy Değeri Zaman Serisi</h5>
+            <canvas id="portfolioChart" height="100"></canvas>
+        </div>
+        <div class="col-md-4">
+            <h5>Risk Dağılımı</h5>
+            <canvas id="riskChart" height="100"></canvas>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <h5>Portföy</h5>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Sembol</th>
+                        <th>Adet</th>
+                        <th>Ortalama Alış</th>
+                        <th>Güncel Fiyat</th>
+                        <th>Toplam Değer</th>
+                        <th>Kar/Zarar</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in portfolio %}
+                    <tr>
+                        <td>{{ item.symbol }}</td>
+                        <td>{{ item.quantity }}</td>
+                        <td>{{ item.avg_buy_price|floatformat:2 }}</td>
+                        <td>{{ item.current_price|floatformat:2 }}</td>
+                        <td>{{ item.value|floatformat:2 }}</td>
+                        <td class="{% if item.profit >= 0 %}text-success{% else %}text-danger{% endif %}">{{ item.profit|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6">Portföyde hisse yok.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="col-md-6">
+            <h5>Son 20 İşlem</h5>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Tarih</th>
+                        <th>Sembol</th>
+                        <th>İşlem Tipi</th>
+                        <th>Adet</th>
+                        <th>Fiyat</th>
+                        <th>Kar/Zarar</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trade in trades %}
+                    <tr>
+                        <td>{{ trade.date|date:"Y-m-d H:i" }}</td>
+                        <td>{{ trade.symbol }}</td>
+                        <td>{{ trade.get_trade_type_display }}</td>
+                        <td>{{ trade.quantity }}</td>
+                        <td>{{ trade.price|floatformat:2 }}</td>
+                        <td class="{% if trade.profit_loss >= 0 %}text-success{% else %}text-danger{% endif %}">{{ trade.profit_loss|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6">Henüz işlem yok.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Portföy zaman serisi grafiği
+const portfolioLabels = [{% for snap in snapshots %}"{{ snap.date|date:'Y-m-d H:i' }}",{% endfor %}];
+const portfolioData = [{% for snap in snapshots %}{{ snap.total_value|floatformat:2 }},{% endfor %}];
+const profitData = [{% for snap in snapshots %}{{ snap.total_profit|floatformat:2 }},{% endfor %}];
+const ctx = document.getElementById('portfolioChart').getContext('2d');
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: portfolioLabels,
+        datasets: [
+            {
+                label: 'Portföy Değeri',
+                data: portfolioData,
+                borderColor: 'rgba(54, 162, 235, 1)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                fill: true,
+                tension: 0.2
+            },
+            {
+                label: 'Toplam Kar/Zarar',
+                data: profitData,
+                borderColor: 'rgba(75, 192, 192, 1)',
+                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                fill: false,
+                tension: 0.2
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: { position: 'top' },
+            title: { display: false }
+        },
+        scales: {
+            y: { beginAtZero: false }
+        }
+    }
+});
+// Risk dağılımı pasta grafiği
+const riskLabels = [{% for item in risk_data %}"{{ item.symbol }}",{% endfor %}];
+const riskValues = [{% for item in risk_data %}{{ item.value|floatformat:2 }},{% endfor %}];
+const riskColors = [
+    '#007bff', '#28a745', '#ffc107', '#dc3545', '#17a2b8', '#6f42c1', '#fd7e14', '#20c997', '#6610f2', '#e83e8c',
+    '#343a40', '#f8f9fa', '#6c757d', '#adb5bd', '#ff6f61', '#6b5b95', '#88b04b', '#f7cac9', '#92a8d1', '#955251'
+];
+const ctx2 = document.getElementById('riskChart').getContext('2d');
+new Chart(ctx2, {
+    type: 'pie',
+    data: {
+        labels: riskLabels,
+        datasets: [{
+            data: riskValues,
+            backgroundColor: riskColors,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: { position: 'bottom' },
+            title: { display: false }
+        }
+    }
+});
+</script>
+{% endblock %} 

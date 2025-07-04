@@ -286,7 +286,7 @@ def advanced_karar_skora_cevir(
         skor += agirliklar.get("Volume", 0.05) * min(max(vol_change, 0), 1)
     return round(skor, 2) 
 
-from strategy.score_weights import strong_signal_filter
+from investment_bot.strategy.score_weights import strong_signal_filter
 
 def decide_with_prediction(tech_score, pred_6m, pred_1y, current_price, sector_score=None, buy_threshold=1.0, sell_threshold=-1.0, pred_weight=0.7, sector_thresh=0.7):
     """
