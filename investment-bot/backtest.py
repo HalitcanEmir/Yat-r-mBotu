@@ -5,41 +5,27 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
-from multiprocessing import Pool
-
 from indicators.rsi import calculate_rsi
 from indicators.macd import calculate_macd
-from strategy.decision_engine import calculate_decision_score, calculate_sell_score, alim_karari_ver, alim_karari_ver_agirlikli, macro_score, price_volume_signal, karar_skora_cevir, vix_score, putcall_score, adline_score, m2_score, pmi_score, hy_spread_score, yield_curve_score, fund_flows_score, advanced_karar_skora_cevir, calculate_atr_stop_levels
-from portfolio.portfolio_manager import simulate_buy_sell, uygula_alim_karari, auto_rebalance_portfolio, plot_portfolio_risk
+from strategy.decision_engine import calculate_decision_score, calculate_sell_score, alim_karari_ver, alim_karari_ver_agirlikli
+from portfolio.portfolio_manager import uygula_alim_karari, plot_portfolio_risk
 from strategy.learning import update_weights_after_result, log_learning_data, analyze_learning_log_and_update_weights, gosterge_agirliklari_ogren
 from utils.fetch_price import fetch_multiple_stock_data, create_db_schema, save_trade, save_indicator, save_portfolio_snapshot
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from strategy.score_weights import update_global_weights_from_log, rolling_weight_update
 from yatirim_botu.core.indicators import add_atr
-from ml_models import train_strategy_selector, predict_strategy
+import numpy as np
+import json
 
-# PyPortfolioOpt ile portföy optimizasyon fonksiyonu
-try:
-    from pypfopt import EfficientFrontier, risk_models, expected_returns
-    pypfopt_available = True
-except ImportError:
-    pypfopt_available = False
-
-def optimize_portfolio_with_mpt(price_df):
-    if not pypfopt_available:
-        print("PyPortfolioOpt yüklü değil, portföy optimizasyonu atlanıyor.")
-        return None
-    mu = expected_returns.mean_historical_return(price_df)
-    S = risk_models.sample_cov(price_df)
-    ef = EfficientFrontier(mu, S)
-    weights = ef.max_sharpe()
-    cleaned_weights = ef.clean_weights()
-    print("[MPT] Optimal portföy ağırlıkları:", cleaned_weights)
-    return cleaned_weights
+# PyPortfolioOpt ile ilgili optimize_portfolio_with_mpt fonksiyonunu ve kullanılmayan tüm kodlarını kaldırıyorum.
+# optimize_portfolio_with_mpt fonksiyonu ve PyPortfolioOpt ile ilgili kodlar kaldırıldı.
 
 print("AAPL verisi çekiliyor...")
 df = yf.download("AAPL", start="2020-01-01", end="2024-12-31")
+if df is None or df.empty:
+    print("Veri çekilemedi veya boş. Çıkılıyor.")
+    exit()
 # Sütunlar MultiIndex ise tek seviyeye indir
 if isinstance(df.columns, pd.MultiIndex):
     df.columns = df.columns.get_level_values(0)
@@ -47,7 +33,10 @@ print("df.columns:", df.columns)
 if df is None or df.empty:
     print("Veri çekilemedi veya boş. Çıkılıyor.")
     exit()
-print(df.head())
+# Göstergeleri eklemeden önce indexi sıfırla
+print("df.head() (göstergeler eklenmeden önce):\n", df.head(10))
+df = df.reset_index()
+print("df.tail() (göstergeler eklendikten sonra):\n", df.tail(10))
 print("Veri satırı sayısı:", len(df))
 
 # Eğer df["Close"] bir DataFrame ise, ilk sütunu al
@@ -57,8 +46,12 @@ else:
     close = df["Close"]
 
 df["RSI"] = calculate_rsi(close)
+print("RSI örnek:", type(df["RSI"][:5]), df["RSI"][:5])
 df["MACD"], df["Signal"] = calculate_macd(close)
+print("MACD örnek:", type(df["MACD"][:5]), df["MACD"][:5])
+print("Signal örnek:", type(df["Signal"][:5]), df["Signal"][:5])
 df["MA200"] = df["Close"].rolling(window=200).mean()
+print("MA200 örnek:", type(df["MA200"][:5]), df["MA200"][:5])
 
 # Mock macro data for demonstration (in real use, pull from macro_signals)
 df["M2_GROWTH"] = 0.01  # Yıllık para arzı büyüme oranı (örnek)
@@ -67,7 +60,7 @@ df["PREV_FED_RATE"] = 4.75  # Önceki faiz (örnek)
 
 # Göstergelerin dolu olduğu satırları filtrele
 indicator_cols = ["RSI", "MACD", "Signal", "MA200"]
-df = df.dropna(subset=indicator_cols)
+df = df.dropna(subset=indicator_cols).reset_index()
 
 portfolio_value = []
 cash = 5000
@@ -100,7 +93,7 @@ except Exception:
     isoforest_model = None
 
 # Haftalık simülasyon: her 5 günde bir işlem yap
-for i in range(200, len(df), 5):
+for i in range(0, len(df), 5):
     row = df.iloc[i]
     # Göstergeleri güvenli şekilde float olarak çek, NaN ise atla
     try:
@@ -131,40 +124,145 @@ for i in range(200, len(df), 5):
     }
     score = calculate_decision_score(indicators, {"RSI": 1, "MACD": 1}, news_score=0)
     price = close_price
-    date = row.name
+    date = row['Date']
     ma50 = float(df.iloc[i]["Close"]) if i >= 50 else price
     # Teknik kırılım ve destek/direnç (örnek, gerçek fonksiyonlarla değiştirilebilir)
     direnc_kirildi = price > ma200 * 1.01
     destekten_sekti = price < ma200 * 0.99
     para_arzi_artiyor = m2_growth > 0
     faiz_dusuyor = fed_rate < prev_fed_rate
-    # Ağırlıklı alım skoru ve kararı
+    # Strateji fonksiyonunu çağır ve kararını al
+    if selected_strategy == 'trend':
+        strategy_decision = trend_strategy_decision(ma50, ma200, price, macd)
+    elif selected_strategy == 'mean_reversion':
+        # Bollinger bandı yoksa dummy değer ver
+        bollinger_low = row.get('BollingerLow', ma50 * 0.97)
+        bollinger_high = row.get('BollingerHigh', ma50 * 1.03)
+        strategy_decision = mean_reversion_strategy_decision(rsi, price, bollinger_low, bollinger_high)
+    elif selected_strategy == 'volatility':
+        atr = row.get('ATR', 0)
+        vix = row.get('VIX', 0)
+        prev_price = df.iloc[i-1]['Close'] if i > 0 else price
+        strategy_decision = volatility_strategy_decision(atr, vix, price, prev_price)
+    else:
+        prev_price = df.iloc[i-1]['Close'] if i > 0 else price
+        prev_volume = df.iloc[i-1]['Volume'] if i > 0 else row.get('Volume', 0)
+        strategy_decision = momentum_strategy_decision(price, prev_price, row.get('Volume', 0), prev_volume)
+    # Ağırlıklı skor ve confidence
     skor, confidence = alim_karari_ver_agirlikli(rsi, macd, signal, ma50, ma200, agirliklar)
-    print(f"DEBUG | Tarih: {date}, RSI: {rsi}, MACD: {macd}, Signal: {signal}, MA50: {ma50}, MA200: {ma200}, Skor: {skor}, Confidence: {confidence}, Agirliklar: {agirliklar}")
+    date_str = date.date() if hasattr(date, 'date') else str(date)
+    print(f"DEBUG | Tarih: {date_str}, RSI: {rsi}, MACD: {macd}, Signal: {signal}, MA50: {ma50}, MA200: {ma200}, Skor: {skor}, Confidence: {confidence}, Agirliklar: {agirliklar}")
     alim_var = skor > 0.3  # Eşik: 0.3 (daha fazla işlem için düşürüldü)
     # Satış skoru (profesyonel mantık)
     sell_score = calculate_sell_score(rsi, macd, signal, price, ma200, m2_growth, fed_rate, prev_fed_rate)
     current_loss = (buy_price - price) / buy_price if stock > 0 else 0
-    print(f"{date.date()} | Score: {score:.2f} | SellScore: {sell_score} | AlimSkoruAgirlikli: {skor:.2f} | Agirliklar: {agirliklar} | Stock: {stock} | Cash: {cash}")
+    print(f"{date_str} | Score: {score:.2f} | SellScore: {sell_score} | AlimSkoruAgirlikli: {skor:.2f} | Agirliklar: {agirliklar} | Stock: {stock} | Cash: {cash}")
+    # Skorları hesapla
+    t_skor = teknik_skor(row)
+    m_skor = makro_skor(row)
+    f_skor = temel_skor(row)
+    genel_skor = t_skor + m_skor + f_skor
+    # Gelişmiş Deep Learning fiyat tahmini (LSTM + GRU ensemble)
+    dl_preds = {}
+    dl_confidences = {}
+    dl_effect = 0
+    dl_ensemble = None
+    scaling_factor = 0.15  # Etkiyi büyütmek/küçültmek için
+    # LSTM tahmini
+    if 'lstm_model' in globals() and lstm_model is not None:
+        features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
+        lstm_pred = get_lstm_prediction(lstm_model, features)
+        lstm_conf = min(1, max(0, abs(lstm_pred)))  # Basit confidence: mutlak değer
+        dl_preds['lstm'] = lstm_pred
+        dl_confidences['lstm'] = lstm_conf
+    # GRU tahmini (örnek, varsa)
+    if 'gru_model' in globals() and gru_model is not None:
+        features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
+        gru_pred = get_lstm_prediction(gru_model, features)  # get_lstm_prediction fonksiyonu GRU için de kullanılabilir
+        gru_conf = min(1, max(0, abs(gru_pred)))
+        dl_preds['gru'] = gru_pred
+        dl_confidences['gru'] = gru_conf
+    # Ensemble (ortalama)
+    if dl_preds:
+        preds = list(dl_preds.values())
+        confs = list(dl_confidences.values())
+        # Ağırlıklı ortalama (confidence ile)
+        if sum(confs) > 0:
+            dl_ensemble = sum(p * c for p, c in zip(preds, confs)) / sum(confs)
+        else:
+            dl_ensemble = sum(preds) / len(preds)
+        # Dinamik etki: tahminin büyüklüğü ve güvenine göre
+        avg_conf = sum(confs) / len(confs) if confs else 1
+        dl_effect = float(np.clip(dl_ensemble * scaling_factor * avg_conf, -0.2, 0.2))
+        genel_skor += dl_effect
+    # Gelişmiş anomali tespiti ve risk yönetimi
+    anomaly = False
+    anomaly_score = 0
+    risk_modu = 'normal'
+    risk_aksiyonu = 'standart'
+    risk_etki = 0
+    pozisyon_carpani = 1.0
+    if 'isoforest_model' in globals() and isoforest_model is not None:
+        anomaly_features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
+        # Isolation Forest ile anomaly_score al
+        try:
+            anomaly_score = isoforest_model.decision_function([anomaly_features])[0]
+        except Exception:
+            anomaly_score = 0
+        # Skor düşükse anomali var
+        if anomaly_score < -0.15:
+            anomaly = True
+            risk_modu = 'panik'
+            risk_aksiyonu = 'al-sat durdur, pozisyonu küçült'
+            risk_etki = -0.25
+            pozisyon_carpani = 0.2
+        elif anomaly_score < 0.05:
+            anomaly = True
+            risk_modu = 'defansif'
+            risk_aksiyonu = 'eşikleri yükselt, pozisyonu küçült'
+            risk_etki = -0.12
+            pozisyon_carpani = 0.5
+        else:
+            anomaly = False
+            risk_modu = 'normal'
+            risk_aksiyonu = 'standart'
+            risk_etki = 0
+            pozisyon_carpani = 1.0
+        genel_skor += risk_etki
+    # Piyasa rejimi ve eşik belirleme
+    rejim = belirle_piyasa_rejimi(row.get('ATR'), row.get('VIX'), row.get('MA50'), row.get('MA200'))
+    esik = rejime_gore_esik(rejim)
+    # Strateji seçimi
+    if rejim.startswith('trend'):
+        selected_strategy = 'trend'
+    elif rejim == 'sideways':
+        selected_strategy = 'mean_reversion'
+    elif rejim == 'volatility':
+        selected_strategy = 'volatility'
+    else:
+        selected_strategy = 'momentum'
     # AL Kararı (ağırlıklı, öğrenen)
     if alim_var and cash >= price:
-        cash, stock, miktar = uygula_alim_karari(alim_var, skor, cash, price, int(stock))
+        miktar_raw = 1
+        miktar = max(1, int(miktar_raw * pozisyon_carpani))
+        cash, stock, miktar = uygula_alim_karari(alim_var, skor, cash, price, int(stock) + miktar - 1)
         if miktar > 0:
             buy_price = float(price)
-            trade_log.append({"date": date, "action": "BUY", "price": price, "amount": miktar, "alim_skoru_agirlikli": skor, "agirliklar": agirliklar})
-            print(f"{date.date()} ALIM: {price} x {miktar} (AlimSkoruAgirlikli: {skor:.2f})")
+            trade_log.append({'date': row.name, 'ticker': 'AAPL', 'action': 'BUY', 'price': price, 'amount': miktar, 'strategy': selected_strategy, 'strategy_decision': strategy_decision, 'confidence': confidence, 'rejim': rejim, 'risk_modu': risk_modu, 'anomaly': anomaly, 'anomaly_score': anomaly_score, 'risk_aksiyonu': risk_aksiyonu, 'risk_etki': risk_etki, 'pozisyon_carpani': pozisyon_carpani, 'genel_skor': skor, 'genel_skor_dl': genel_skor, 'dl_preds': dl_preds, 'dl_confidences': dl_confidences, 'dl_ensemble': dl_ensemble, 'dl_effect': dl_effect, 'success': None, 'weights': agirliklar.copy(), 'indicator': 'GENEL', 'RSI': rsi, 'MACD': macd, 'MA50': ma50, 'MA200': ma200, 'profit': 0, 'teknik_skor': t_skor, 'makro_skor': m_skor, 'temel_skor': f_skor, 'genel_skor_katmanli': genel_skor})
+            print(f"{date_str} ALIM: {price} x {miktar} (AlimSkoruAgirlikli: {skor:.2f})")
             # Learning log: 5 gün sonra fiyatı kaydet
             if i + 5 < len(df):
                 sonraki_fiyat = float(df.iloc[i + 5]["Close"])
                 ma_durum = int(ma50 > ma200)
-                log_learning_data(date.date(), "ALIM", price, rsi, macd - signal, ma_durum, sonraki_fiyat)
+                log_learning_data(date_str, "ALIM", price, rsi, macd - signal, ma_durum, sonraki_fiyat)
     # SAT Kararı (profesyonel mantık)
     elif (sell_score >= 3 or (sell_score == 2 and current_loss > 0) or current_loss >= 0.10) and stock > 0:
         cash += price * stock
         result = "gain" if price > buy_price else "loss"
         update_weights_after_result(result, indicators_used=["RSI", "MACD", "MA200"])
-        trade_log.append({"date": date, "action": "SELL", "price": price, "result": result, "sell_score": sell_score, "amount": stock})
-        print(f"{date.date()} SATIŞ: {price} x {stock} → {'KAR' if result == 'gain' else 'ZARAR'} (SellScore: {sell_score})")
+        profit = (price - buy_price) * stock
+        trade_log.append({'date': row.name, 'ticker': 'AAPL', 'action': 'SELL', 'price': price, 'amount': stock, 'strategy': selected_strategy, 'strategy_decision': strategy_decision, 'confidence': confidence, 'rejim': rejim, 'risk_modu': risk_modu, 'anomaly': anomaly, 'anomaly_score': anomaly_score, 'risk_aksiyonu': risk_aksiyonu, 'risk_etki': risk_etki, 'pozisyon_carpani': pozisyon_carpani, 'genel_skor': skor, 'genel_skor_dl': genel_skor, 'dl_preds': dl_preds, 'dl_confidences': dl_confidences, 'dl_ensemble': dl_ensemble, 'dl_effect': dl_effect, 'success': None, 'weights': agirliklar.copy(), 'indicator': 'GENEL', 'RSI': rsi, 'MACD': macd, 'MA50': ma50, 'MA200': ma200, 'profit': profit, 'teknik_skor': t_skor, 'makro_skor': m_skor, 'temel_skor': f_skor, 'genel_skor_katmanli': genel_skor})
+        print(f"{date_str} SATIŞ: {price} x {stock} → {'KAR' if result == 'gain' else 'ZARAR'} (SellScore: {sell_score})")
         stock = 0
     total_value = cash + stock * price
     portfolio_value.append(total_value)
@@ -188,21 +286,36 @@ else:
 
 print("Simülasyon bitti.")
 
+# Trade logunun ilk 5 satırını kontrol için ekrana yazdır
+print("\n--- Trade Log İlk 5 Satır ---")
+for log in trade_log[:5]:
+    print(log)
+
 # Öğrenme logunu analiz et ve ağırlıkları güncelle
 analyze_learning_log_and_update_weights()
 
-# Çoklu NASDAQ hisse listesi
+# Çoklu NASDAQ hisse listesi (en büyük 50, örnek)
 nasdaq_tickers = [
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'INTC', 'AMD', 'NFLX'
+    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'META', 'AVGO', 'GOOGL', 'TSLA', 'COST', 'PEP',
+    'ADBE', 'CSCO', 'AMD', 'NFLX', 'QCOM', 'TXN', 'AMAT', 'INTC', 'TMUS', 'AMGN',
+    'BKNG', 'LRCX', 'REGN', 'ISRG', 'VRTX', 'ADI', 'MU', 'MDLZ', 'INTU', 'GILD',
+    'PDD', 'MAR', 'KDP', 'ATVI', 'CSX', 'MELI', 'CTAS', 'IDXX', 'KLAC', 'ASML',
+    'PANW', 'CDNS', 'MRVL', 'AEP', 'EXC', 'SNPS', 'ORLY', 'NXPI', 'ROST', 'SBUX'
 ]
 
 # Kullanıcıdan veya koddan tarih aralığı belirle
-sim_start = datetime.datetime(2021, 1, 1)
+import datetime
 sim_end = datetime.datetime.now()
+sim_start = sim_end - datetime.timedelta(days=3*365)  # Son 3 yıl
 
 # Tüm hisseler için veri çek (tarih aralığına göre)
 all_data = fetch_multiple_stock_data(nasdaq_tickers, start_date=sim_start, end_date=sim_end)
-# Tüm DataFrame'leri tekrar kırpmaya gerek yok, çünkü fetch fonksiyonu zaten bu aralığı getiriyor.
+# Eksik veya boş veri gelen ticker'ları çıkar
+nasdaq_tickers = [t for t in nasdaq_tickers if t in all_data and all_data[t] is not None and not all_data[t].empty]
+
+# Çoklu hisse portföyü için başlangıç portföyünü oluştur
+portfolio = {t: {'stock': 0, 'buy_price': 0.0} for t in nasdaq_tickers}
+cash = 100000  # Başlangıç nakdi
 
 # ATR'yi her hisseye ekle
 for ticker in all_data:
@@ -222,28 +335,18 @@ def add_indicators(df):
 for ticker in all_data:
     all_data[ticker] = add_indicators(all_data[ticker])
 
-# Portföy ve nakit yönetimi
-cash = 100000
-portfolio = {ticker: {'stock': 0, 'buy_price': 0.0} for ticker in nasdaq_tickers}
-trade_log = []
-portfolio_value = []
-agirliklar = {
-    "RSI": 0.1, "MACD": 0.1, "MA": 0.08, "SuperTrend": 0.08, "Keltner": 0.05, "Bollinger": 0.05, "Fibo": 0.05, "PriceVol": 0.08, "Macro": 0.08,
-    "VIX": 0.05, "PutCall": 0.05, "ADLine": 0.05, "M2": 0.05, "PMI": 0.05, "HYSpread": 0.05, "YieldCurve": 0.05, "FundFlows": 0.05
-}
-
 # Ortak tarih aralığını bul
 common_index = all_data[nasdaq_tickers[0]].index
 for ticker in nasdaq_tickers[1:]:
     common_index = common_index.intersection(all_data[ticker].index)
-# Sadece 2015-2018 arası tarihleri al
-common_index = common_index[(common_index >= '2015-01-01') & (common_index <= '2018-12-31')]
-common_index = common_index[200::5]  # 200 sonrası, 5 günde bir
+# Son 3 yıl ve 2 haftada bir (14 günde bir)
+common_index = common_index[(common_index >= str(sim_start.date())) & (common_index <= str(sim_end.date()))]
+common_index = common_index[::14]  # 2 haftada bir
 
 portfolio_value = []
 date_list = []
 
-indicator_columns = ['RSI', 'MACD', 'MA']  # Gerekirse diğer ana göstergeleri de ekleyin
+indicator_columns = ['RSI', 'MACD', 'MA50', 'MA200']  # Gerekirse diğer ana göstergeleri de ekleyin
 
 # --- ML tabanlı strateji seçici altyapısı ---
 from ml_models import train_strategy_selector, predict_strategy
@@ -308,21 +411,19 @@ def momentum_strategy_decision(price, prev_price, volume, prev_volume):
     else:
         return {'action': 'hold'}
 
-# --- Çok Katmanlı Puanlama Fonksiyonları ---
+# --- Çok Katmanlı Skor Fonksiyonları ---
 def teknik_skor(row):
-    # RSI, MACD, Bollinger, MA, SuperTrend gibi göstergelerden normalize skor
     skorlar = []
-    if 'RSI' in row: skorlar.append(max(0, min(1, (row['RSI']-30)/40)))  # 30-70 arası normalize
+    if 'RSI' in row: skorlar.append(max(0, min(1, (row['RSI']-30)/40)))  # 30-70 normalize
     if 'MACD' in row and 'Signal' in row: skorlar.append(1 if row['MACD'] > row['Signal'] else 0)
     if 'MA50' in row and 'MA200' in row: skorlar.append(1 if row['MA50'] > row['MA200'] else 0)
-    # Bollinger: fiyat üst banda yakınsa 1, alt banda yakınsa 0
+    # Bollinger Bands örneği (varsa)
     if 'Close' in row and 'BollingerHigh' in row and 'BollingerLow' in row:
         rel = (row['Close'] - row['BollingerLow']) / (row['BollingerHigh'] - row['BollingerLow'] + 1e-6)
         skorlar.append(rel)
     return sum(skorlar) / len(skorlar) if skorlar else 0.5
 
 def makro_skor(row):
-    # FED, M2, PMI, VIX gibi makro göstergelerden skor
     skorlar = []
     if 'FED_RATE' in row and 'PREV_FED_RATE' in row:
         skorlar.append(1 if row['FED_RATE'] < row['PREV_FED_RATE'] else 0)
@@ -331,13 +432,15 @@ def makro_skor(row):
     return sum(skorlar) / len(skorlar) if skorlar else 0.5
 
 def temel_skor(row):
-    # PE, EPS, gelir artışı, borç, nakit akışı gibi temel göstergelerden skor (örnek/mock)
     skorlar = []
     if 'PE' in row: skorlar.append(1 - min(1, row['PE']/40))
     if 'EPS' in row: skorlar.append(max(0, min(1, row['EPS']/10)))
     if 'DEBT' in row: skorlar.append(1 - min(1, row['DEBT']/100))
     if 'CASHFLOW' in row: skorlar.append(max(0, min(1, row['CASHFLOW']/10)))
     return sum(skorlar) / len(skorlar) if skorlar else 0.5
+
+# --- Ağırlıklar ---
+W1, W2, W3 = 1/3, 1/3, 1/3  # Başlangıçta eşit
 
 # --- Piyasa Rejimi ve Dinamik Strateji Seçimi Fonksiyonları ---
 def belirle_piyasa_rejimi(atr, vix, ma50, ma200, makro_sinyal=None):
@@ -392,17 +495,20 @@ def karar_ve_islem(row, genel_skor, rejim, esik, selected_strategy, price, cash,
         portfolio[ticker]['stock'] += miktar
         portfolio[ticker]['buy_price'] = price
         işlem_başarılı = True
-        trade_log.append({'date': row.name, 'ticker': ticker, 'action': 'BUY', 'price': price, 'amount': miktar, 'strategy': selected_strategy, 'rejim': rejim, 'genel_skor': genel_skor, 'success': işlem_başarılı, 'weights': agirliklar.copy()})
+        trade_log.append({'date': row.name, 'ticker': ticker, 'action': 'BUY', 'price': price, 'amount': miktar, 'strategy': selected_strategy, 'strategy_decision': strategy_decision, 'confidence': confidence, 'rejim': rejim, 'risk_modu': risk_modu, 'anomaly': anomaly, 'anomaly_score': anomaly_score, 'risk_aksiyonu': risk_aksiyonu, 'risk_etki': risk_etki, 'pozisyon_carpani': pozisyon_carpani, 'genel_skor': genel_skor, 'genel_skor_dl': genel_skor, 'dl_preds': dl_preds, 'dl_confidences': dl_confidences, 'dl_ensemble': dl_ensemble, 'dl_effect': dl_effect, 'success': işlem_başarılı, 'weights': agirliklar.copy(), 'indicator': 'GENEL', 'RSI': rsi, 'MACD': macd, 'MA50': ma50, 'MA200': ma200, 'profit': 0, 'teknik_skor': t_skor, 'makro_skor': m_skor, 'temel_skor': f_skor, 'genel_skor_katmanli': genel_skor})
     elif genel_skor <= esik['sell'] and stock > 0:
         action = 'sell'
         miktar = stock
         cash += price * miktar
         portfolio[ticker]['stock'] -= miktar
         işlem_başarılı = price > buy_price
-        trade_log.append({'date': row.name, 'ticker': ticker, 'action': 'SELL', 'price': price, 'amount': miktar, 'strategy': selected_strategy, 'rejim': rejim, 'genel_skor': genel_skor, 'success': işlem_başarılı, 'weights': agirliklar.copy()})
+        trade_log.append({'date': row.name, 'ticker': ticker, 'action': 'SELL', 'price': price, 'amount': miktar, 'strategy': selected_strategy, 'strategy_decision': strategy_decision, 'confidence': confidence, 'rejim': rejim, 'risk_modu': risk_modu, 'anomaly': anomaly, 'anomaly_score': anomaly_score, 'risk_aksiyonu': risk_aksiyonu, 'risk_etki': risk_etki, 'pozisyon_carpani': pozisyon_carpani, 'genel_skor': genel_skor, 'genel_skor_dl': genel_skor, 'dl_preds': dl_preds, 'dl_confidences': dl_confidences, 'dl_ensemble': dl_ensemble, 'dl_effect': dl_effect, 'success': işlem_başarılı, 'weights': agirliklar.copy(), 'indicator': 'GENEL', 'RSI': rsi, 'MACD': macd, 'MA50': ma50, 'MA200': ma200, 'profit': profit, 'teknik_skor': t_skor, 'makro_skor': m_skor, 'temel_skor': f_skor, 'genel_skor_katmanli': genel_skor})
     else:
         action = 'hold'
     return cash, portfolio, trade_log, action, miktar
+
+# Risk logunu başlat
+risk_log = []
 
 for idx, date in enumerate(common_index):
     total_value = cash
@@ -421,8 +527,6 @@ for idx, date in enumerate(common_index):
         t_skor = teknik_skor(row)
         m_skor = makro_skor(row)
         f_skor = temel_skor(row)
-        # Dinamik ağırlıklar (örnek: eşit)
-        W1, W2, W3 = agirliklar.get('TEKNIK', 0.33), agirliklar.get('MAKRO', 0.33), agirliklar.get('TEMEL', 0.34)
         genel_skor = W1 * t_skor + W2 * m_skor + W3 * f_skor
         row['GENEL_SKOR'] = genel_skor
         price = float(row['Close'].iloc[0]) if hasattr(row['Close'], 'iloc') else float(row['Close'])
@@ -442,37 +546,82 @@ for idx, date in enumerate(common_index):
         if rejim.startswith('trend'):
             selected_strategy = 'trend'
         elif rejim == 'sideways':
-            selected_strategy = 'mean'
+            selected_strategy = 'mean_reversion'
         elif rejim == 'volatility':
             selected_strategy = 'volatility'
         else:
             selected_strategy = 'momentum'
         # Anomali tespiti ve risk modu
+        anomaly = False
+        anomaly_score = 0
         risk_modu = 'normal'
-        if isoforest_model is not None:
-            features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
-            if is_anomaly_isoforest(isoforest_model, features):
+        risk_aksiyonu = 'standart'
+        risk_etki = 0
+        pozisyon_carpani = 1.0
+        if 'isoforest_model' in globals() and isoforest_model is not None:
+            anomaly_features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
+            # Isolation Forest ile anomaly_score al
+            try:
+                anomaly_score = isoforest_model.decision_function([anomaly_features])[0]
+            except Exception:
+                anomaly_score = 0
+            # Skor düşükse anomali var
+            if anomaly_score < -0.15:
+                anomaly = True
+                risk_modu = 'panik'
+                risk_aksiyonu = 'al-sat durdur, pozisyonu küçült'
+                risk_etki = -0.25
+                pozisyon_carpani = 0.2
+            elif anomaly_score < 0.05:
+                anomaly = True
                 risk_modu = 'defansif'
-                # Eşikleri sıkılaştır
-                row['GENEL_SKOR'] -= 0.2
+                risk_aksiyonu = 'eşikleri yükselt, pozisyonu küçült'
+                risk_etki = -0.12
+                pozisyon_carpani = 0.5
+            else:
+                anomaly = False
+                risk_modu = 'normal'
+                risk_aksiyonu = 'standart'
+                risk_etki = 0
+                pozisyon_carpani = 1.0
+            genel_skor += risk_etki
+        # Gelişmiş Deep Learning fiyat tahmini (LSTM + GRU ensemble)
+        dl_preds = {}
+        dl_confidences = {}
+        dl_effect = 0
+        dl_ensemble = None
+        scaling_factor = 0.15  # Etkiyi büyütmek/küçültmek için
+        # LSTM tahmini
+        if 'lstm_model' in globals() and lstm_model is not None:
+            features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
+            lstm_pred = get_lstm_prediction(lstm_model, features)
+            lstm_conf = min(1, max(0, abs(lstm_pred)))  # Basit confidence: mutlak değer
+            dl_preds['lstm'] = lstm_pred
+            dl_confidences['lstm'] = lstm_conf
+        # GRU tahmini (örnek, varsa)
+        if 'gru_model' in globals() and gru_model is not None:
+            features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
+            gru_pred = get_lstm_prediction(gru_model, features)  # get_lstm_prediction fonksiyonu GRU için de kullanılabilir
+            gru_conf = min(1, max(0, abs(gru_pred)))
+            dl_preds['gru'] = gru_pred
+            dl_confidences['gru'] = gru_conf
+        # Ensemble (ortalama)
+        if dl_preds:
+            preds = list(dl_preds.values())
+            confs = list(dl_confidences.values())
+            # Ağırlıklı ortalama (confidence ile)
+            if sum(confs) > 0:
+                dl_ensemble = sum(p * c for p, c in zip(preds, confs)) / sum(confs)
+            else:
+                dl_ensemble = sum(preds) / len(preds)
+            # Dinamik etki: tahminin büyüklüğü ve güvenine göre
+            avg_conf = sum(confs) / len(confs) if confs else 1
+            dl_effect = float(np.clip(dl_ensemble * scaling_factor * avg_conf, -0.2, 0.2))
+            genel_skor += dl_effect
         # Merkezi karar ve işlem fonksiyonu ile yönet
         cash, portfolio, trade_log, action, miktar = karar_ve_islem(row, row['GENEL_SKOR'], rejim, esik, selected_strategy, price, cash, portfolio[ticker]['stock'], portfolio[ticker]['buy_price'], agirliklar, portfolio, ticker, trade_log)
         print(f"{date.date()} {ticker} | Strateji: {selected_strategy} | Rejim: {rejim} | Skor: {row['GENEL_SKOR']:.2f} | Karar: {action} | Miktar: {miktar} | Stock: {portfolio[ticker]['stock']} | Cash: {cash}")
-        skor = advanced_karar_skora_cevir(
-            rsi, macd, signal, ma50, ma200, price, bollinger_high, bollinger_low, volume, row['Volume'], agirliklar
-        )
-        ticker_scores.append((ticker, skor, price, ma50, ma200, rsi, macd, signal, stock, buy_price, row))
-        # Deep learning fiyat tahmini ile genel skoru güncelle
-        dl_pred = 0
-        if lstm_model is not None:
-            # Özellikler: ['Close', 'RSI', 'MACD', 'MA50', 'MA200', 'Volume']
-            features = [row.get('Close', 0), row.get('RSI', 0), row.get('MACD', 0), row.get('MA50', 0), row.get('MA200', 0), row.get('Volume', 0)]
-            dl_pred = get_lstm_prediction(lstm_model, features)
-            # Pozitif tahminse genel skora +, negatifse - etki
-            if dl_pred > 0:
-                row['GENEL_SKOR'] += 0.1
-            elif dl_pred < 0:
-                row['GENEL_SKOR'] -= 0.1
+        ticker_scores.append((ticker, genel_skor, price, ma50, ma200, rsi, macd, signal, stock, buy_price, row))
     ticker_scores.sort(key=lambda x: x[1], reverse=True)
     # Dinamik eşik: önce 0.3, yoksa 0.15, yine yoksa en yüksek skorlu hisse
     top_to_buy = [t for t in ticker_scores if t[1] > 0.3][:2]
@@ -501,21 +650,20 @@ for idx, date in enumerate(common_index):
                 buy_price = float(price)
                 portfolio[ticker]['stock'] = int(stock)
                 portfolio[ticker]['buy_price'] = float(buy_price)
-                stop_loss, take_profit = calculate_atr_stop_levels(buy_price, atr)
                 # Trade'i veritabanına kaydet
-                save_trade(ticker, 'BUY', price, int(miktar), '', 0, str(row.name))
-                print(f"{row.name.date()} {ticker} ALIM: {price} x {miktar} (Conf: {confidence}) SL: {stop_loss:.2f} TP: {take_profit:.2f}")
+                save_trade(ticker, 'BUY', price, int(miktar), '', 0, str(date))
+                print(f"{date.date()} {ticker} ALIM: {price} x {miktar} (Conf: {confidence})")
                 if idx + 1 < len(df):
                     sonraki_fiyat = df.iloc[idx + 1]['Close'].iloc[0] if hasattr(df.iloc[idx + 1]['Close'], 'iloc') else float(df.iloc[idx + 1]['Close'])
                     ma_durum = int(ma50 > ma200)
-                    log_learning_data(row.name.date(), f"ALIM-{ticker}", price, rsi, macd - signal, ma_durum, sonraki_fiyat)
+                    log_learning_data(date.date(), f"ALIM-{ticker}", price, rsi, macd - signal, ma_durum, sonraki_fiyat)
         elif (sell_score >= 2 or current_loss >= 0.05) and stock > 0:
             cash += price * stock
             result = "gain" if price > buy_price else "loss"
             update_weights_after_result(result, indicators_used=["RSI", "MACD", "MA200"])
             profit = (price - buy_price) * stock
-            trade_log.append({'date': row.name, 'ticker': ticker, 'action': 'SELL', 'price': price, 'result': result, 'sell_score': sell_score, 'amount': int(stock), 'indicator': 'RSI', 'profit': profit})
-            print(f"{row.name.date()} {ticker} SATIŞ: {price} x {stock} → {'KAR' if result == 'gain' else 'ZARAR'}")
+            trade_log.append({'date': date, 'ticker': ticker, 'action': 'SELL', 'price': price, 'result': result, 'sell_score': sell_score, 'amount': int(stock), 'indicator': 'GENEL', 'profit': profit, 'RSI': rsi, 'MACD': macd, 'MA50': ma50, 'MA200': ma200})
+            print(f"{date.date()} {ticker} SATIŞ: {price} x {stock} → {'KAR' if result == 'gain' else 'ZARAR'}")
             portfolio[ticker]['stock'] = int(0)
             portfolio[ticker]['buy_price'] = float(0.0)
     date_list.append(date)
@@ -530,12 +678,14 @@ for idx, date in enumerate(common_index):
         log_df = pd.DataFrame(trade_log)
         # Başarı sütunu yoksa ekle (örnek: kar > 0 ise başarılı)
         if 'success' not in log_df.columns:
-            log_df['success'] = log_df['profit'] > 0
+            log_df['success'] = (log_df['profit'] > 0).astype(int)
+        else:
+            log_df['success'] = log_df['success'].astype(int)
         new_weights = rolling_weight_update(log_df, indicator_columns, window=60)
         if new_weights:
             agirliklar.update(new_weights)
             print(f"Makine öğrenmesi ile ağırlıklar güncellendi: {agirliklar}")
-    # --- Periyodik Monte Carlo Risk Analizi ve ML ile Ağırlık Güncelleme ---
+    # --- Periyodik Monte Carlo Risk Analizi ve Otomatik Portföy Yeniden Dengeleme ---
     if idx > 0 and idx % 50 == 0:
         try:
             from ml_models import monte_carlo_portfolio_simulation
@@ -543,20 +693,40 @@ for idx, date in enumerate(common_index):
             total_value = sum(portfolio[t]['stock'] * all_data[t]['Close'].loc[date] for t in nasdaq_tickers)
             weights = {t: (portfolio[t]['stock'] * all_data[t]['Close'].loc[date]) / total_value if total_value > 0 else 0 for t in nasdaq_tickers}
             print(f"[Risk] {date.date()} Monte Carlo risk analizi başlatılıyor...")
-            monte_carlo_portfolio_simulation(price_df, weights, n_days=30, n_sim=500, initial_value=total_value, plot=False)
+            # Simülasyonu çalıştır, risk metriklerini al
+            risk_results = monte_carlo_portfolio_simulation(price_df, weights, n_days=30, n_sim=1000, initial_value=total_value, plot=False, return_metrics=True)
+            var = risk_results.get('VaR', 0)
+            cvar = risk_results.get('CVaR', 0)
+            mdd = risk_results.get('MDD', 0)
+            sharpe = risk_results.get('Sharpe', 0)
+            sortino = risk_results.get('Sortino', 0)
+            risk_action = 'none'
+            # Risk eşikleri
+            if var < -0.05 or cvar < -0.07 or mdd < -0.10:
+                # Risk yüksek, portföyü defansif moda al
+                for t in portfolio:
+                    portfolio[t]['stock'] = int(portfolio[t]['stock'] * 0.5)
+                risk_action = 'defansif: pozisyonlar %50 azaltıldı'
+            elif sharpe < 0.5 or sortino < 0.7:
+                # Getiri/riski düşük, portföyü yeniden dengele
+                for t in portfolio:
+                    portfolio[t]['stock'] = int(portfolio[t]['stock'] * 0.7)
+                risk_action = 'denge: pozisyonlar %30 azaltıldı'
+            else:
+                risk_action = 'standart: değişiklik yok'
+            # Risk loguna kaydet
+            risk_log.append({'date': str(date), 'VaR': var, 'CVaR': cvar, 'MDD': mdd, 'Sharpe': sharpe, 'Sortino': sortino, 'action': risk_action, 'weights': weights.copy(), 'portfolio': {k: v['stock'] for k, v in portfolio.items()}})
+            print(f"[Risk] {date.date()} Risk metrikleri: VaR={var:.3f}, CVaR={cvar:.3f}, MDD={mdd:.3f}, Sharpe={sharpe:.2f}, Sortino={sortino:.2f}, Aksiyon: {risk_action}")
         except Exception as e:
             print(f"[Risk] Monte Carlo simülasyonu çalıştırılamadı: {e}")
-    if idx > 0 and idx % 50 == 0:
-        try:
-            import pandas as pd
-            log_df = pd.DataFrame(trade_log)
-            agirliklar = update_global_weights_from_log(log_df, agirliklar)
-            print(f"[ML] {date.date()} ML ile ağırlıklar güncellendi: {agirliklar}")
-        except Exception as e:
-            print(f"[ML] Ağırlık güncelleme hatası: {e}")
-    # Portföy snapshot'ı kaydet
-    total_value = cash + sum(portfolio[t]['stock'] * all_data[t].loc[date]['Close'] for t in nasdaq_tickers if date in all_data[t].index)
-    save_portfolio_snapshot(str(date), total_value, cash, str({k: v['stock'] for k, v in portfolio.items()}))
+    # Trade loguna risk aksiyonu özetini ekle (her işlemde)
+    if 'risk_action' in locals():
+        if len(trade_log) > 0:
+            trade_log[-1]['risk_action'] = risk_action
+
+# Simülasyon sonunda risk logunu kaydet
+with open('risk_log.json', 'w', encoding='utf-8') as f:
+    json.dump(risk_log, f, ensure_ascii=False, indent=2)
 
 # Simülasyon sonunda risk dağılımı görselleştir
 price_data = {t: all_data[t]['Close'].iloc[-1] for t in nasdaq_tickers}
