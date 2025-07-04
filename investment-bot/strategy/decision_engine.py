@@ -285,3 +285,30 @@ def advanced_karar_skora_cevir(
         vol_change = (volume - prev_volume) / prev_volume
         skor += agirliklar.get("Volume", 0.05) * min(max(vol_change, 0), 1)
     return round(skor, 2) 
+
+from strategy.score_weights import strong_signal_filter
+
+def decide_with_prediction(tech_score, pred_6m, pred_1y, current_price, sector_score=None, buy_threshold=1.0, sell_threshold=-1.0, pred_weight=0.7, sector_thresh=0.7):
+    """
+    Fiyat tahmini, teknik skor ve sektör skoru ile alım/satım/hold kararı verir.
+    """
+    score = tech_score
+    pred_score = 0
+    # Tahminler mevcutsa, beklenen getiri oranına göre skor ekle
+    if pred_6m is not None and current_price > 0:
+        ret_6m = (float(pred_6m) - current_price) / current_price
+        pred_score += ret_6m
+    if pred_1y is not None and current_price > 0:
+        ret_1y = (float(pred_1y) - current_price) / current_price
+        pred_score += ret_1y
+    # Ortalama al, 2 tahmin varsa etkisi daha yüksek
+    if pred_score != 0:
+        pred_score = pred_score / (2 if (pred_6m is not None and pred_1y is not None) else 1)
+    total_score = score + pred_weight * pred_score
+    # Sadece güçlü sinyal ve sektör skoru yüksekse al
+    if sector_score is not None and strong_signal_filter(score, pred_score, sector_score, tech_thresh=buy_threshold, pred_thresh=0.05, sector_thresh=sector_thresh):
+        return 'buy'
+    elif total_score < sell_threshold:
+        return 'sell'
+    else:
+        return 'hold' 

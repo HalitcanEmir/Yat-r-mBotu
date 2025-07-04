@@ -1,0 +1,33 @@
+# === STRATEGY & RISK CONFIGURATION ===
+
+strategy:
+  rsi_buy: 30           # Buy if RSI is below this value
+  rsi_sell: 70          # Sell if RSI is above this value
+  ma_trend: true        # Use MA50 > MA200 as trend filter
+  atr_volatility_filter: true   # If ATR is too high, avoid trading
+  atr_threshold: 5.0    # ATR threshold for volatility filter
+
+risk:
+  max_position_pct: 0.07    # Tek hisseye max %7
+  stop_loss_pct: 0.05        # Stop-loss %5
+  take_profit_pct: 0.12      # Take-profit %12
+  max_daily_loss_pct: 0.02   # Günlük max zarar %2
+  max_open_positions: 5      # Aynı anda max 5 hisse
+
+goals:
+  annual_return_target: 0.15  # 15% annual return target
+  sharpe_target: 1.2          # Minimum Sharpe ratio
+  max_drawdown: 0.10          # Max 10% drawdown
+
+# === ADVANCED/OPTIONAL ===
+# You can add custom indicators, ML thresholds, or other rules here
+custom_indicators:
+  trend_strength: "(MA50 - MA200) / MA200"
+  normalized_rsi: "RSI / ATR"
+  liquidity_score: "Volume / MarketCap"
+
+ml:
+  use_ml: false
+  buy_score_threshold: 1.0  # Daha yüksek eşik, daha seçici alım
+  pred_weight: 0.7          # Tahminin etkisi artırıldı
+ 

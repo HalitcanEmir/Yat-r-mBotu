@@ -46,3 +46,34 @@ def rolling_weight_update(log_df, indicator_columns, window=60):
     # Normalize
     new_weights = new_weights / new_weights.sum()
     return dict(zip(indicator_columns, new_weights)) 
+
+def strong_signal_filter(tech_score, pred_score, sector_score, tech_thresh=1.0, pred_thresh=0.05, sector_thresh=0.7):
+    """
+    Hem teknik skor, hem tahmin, hem sektör skoru yüksekse True döner.
+    """
+    return (
+        tech_score >= tech_thresh and
+        pred_score >= pred_thresh and
+        sector_score >= sector_thresh
+    ) 
+
+def compute_momentum_score(df, windows=[63, 126, 252]):
+    """
+    Son 3-6-12 ayda fiyatı en çok yükselen hisselere ek skor verir.
+    df: fiyat verisi (DataFrame, 'Close' sütunu olmalı)
+    windows: momentum pencereleri (gün cinsinden)
+    """
+    score = 0
+    for w in windows:
+        if len(df) > w:
+            start = df['Close'].iloc[-w]
+            end = df['Close'].iloc[-1]
+            if start > 0:
+                score += (end - start) / start
+    return score / len(windows) if windows else 0
+
+def top10_bias(ticker, top10_list, bias=0.2):
+    """
+    En büyük 10 şirkete ek skor/bias uygular.
+    """
+    return bias if ticker in top10_list else 0 
