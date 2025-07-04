@@ -510,6 +510,9 @@ def karar_ve_islem(row, genel_skor, rejim, esik, selected_strategy, price, cash,
 # Risk logunu başlat
 risk_log = []
 
+# Ağırlık güncelleme logunu başlat
+weight_log = []
+
 for idx, date in enumerate(common_index):
     total_value = cash
     ticker_scores = []
@@ -668,23 +671,52 @@ for idx, date in enumerate(common_index):
             portfolio[ticker]['buy_price'] = float(0.0)
     date_list.append(date)
     portfolio_value.append(total_value)
-    # Her 30 işlemde bir klasik ağırlık güncelleme
+    # --- Periyodik ML ile Dinamik Ağırlık Güncelleme ---
     if len(trade_log) > 0 and len(trade_log) % 30 == 0:
-        log_df = pd.DataFrame(trade_log)
-        agirliklar = update_global_weights_from_log(log_df, agirliklar)
-        print(f"Ağırlıklar güncellendi: {agirliklar}")
-    # Her 60 işlemde bir makine öğrenmesi ile ağırlık güncelleme
-    if len(trade_log) > 0 and len(trade_log) % 60 == 0:
-        log_df = pd.DataFrame(trade_log)
-        # Başarı sütunu yoksa ekle (örnek: kar > 0 ise başarılı)
-        if 'success' not in log_df.columns:
-            log_df['success'] = (log_df['profit'] > 0).astype(int)
-        else:
-            log_df['success'] = log_df['success'].astype(int)
-        new_weights = rolling_weight_update(log_df, indicator_columns, window=60)
-        if new_weights:
-            agirliklar.update(new_weights)
-            print(f"Makine öğrenmesi ile ağırlıklar güncellendi: {agirliklar}")
+        import pandas as pd
+        from sklearn.ensemble import RandomForestClassifier
+        try:
+            log_df = pd.DataFrame(trade_log)
+            # Başarı sütunu yoksa ekle (örnek: kar > 0 ise başarılı)
+            if 'success' not in log_df.columns:
+                log_df['success'] = (log_df['profit'] > 0).astype(int)
+            else:
+                log_df['success'] = log_df['success'].astype(int)
+            # Göstergeler ve başarı ile RandomForest
+            X = log_df[['RSI', 'MACD', 'MA50', 'MA200']].fillna(0)
+            y = log_df['success']
+            rf = RandomForestClassifier(n_estimators=100, random_state=42)
+            rf.fit(X, y)
+            rf_weights = dict(zip(['RSI', 'MACD', 'MA50', 'MA200'], rf.feature_importances_))
+            rf_score = rf.score(X, y)
+            # XGBoost ile de dene (varsa)
+            try:
+                import xgboost as xgb
+                xgb_model = xgb.XGBClassifier(n_estimators=100, random_state=42, verbosity=0)
+                xgb_model.fit(X, y)
+                xgb_weights = dict(zip(['RSI', 'MACD', 'MA50', 'MA200'], xgb_model.feature_importances_))
+                xgb_score = xgb_model.score(X, y)
+            except Exception:
+                xgb_weights = None
+                xgb_score = 0
+            # En iyi skoru seç
+            if xgb_score > rf_score:
+                best_weights = xgb_weights
+                best_model = 'XGBoost'
+                best_score = xgb_score
+            else:
+                best_weights = rf_weights
+                best_model = 'RandomForest'
+                best_score = rf_score
+            agirliklar.update(best_weights)
+            # Logla
+            weight_log.append({'date': str(date), 'model': best_model, 'score': float(best_score), 'weights': best_weights})
+            print(f"[Ağırlık] {date.date()} ML ile ağırlıklar güncellendi: {agirliklar} (Model: {best_model}, Skor: {best_score:.2f})")
+            # Trade loguna özet ekle
+            if len(trade_log) > 0:
+                trade_log[-1]['weight_update'] = {'model': best_model, 'score': float(best_score), 'weights': best_weights}
+        except Exception as e:
+            print(f"[Ağırlık] ML ile ağırlık güncelleme hatası: {e}")
     # --- Periyodik Monte Carlo Risk Analizi ve Otomatik Portföy Yeniden Dengeleme ---
     if idx > 0 and idx % 50 == 0:
         try:
@@ -832,4 +864,8 @@ if __name__ == "__main__":
         weights = {t: (portfolio[t]['stock'] * all_data[t]['Close'].iloc[-1]) / total_value if total_value > 0 else 0 for t in nasdaq_tickers}
         monte_carlo_portfolio_simulation(price_df, weights, n_days=30, n_sim=1000, initial_value=total_value, plot=True)
     except Exception as e:
-        print(f"[Risk] Monte Carlo simülasyonu çalıştırılamadı: {e}") 
+        print(f"[Risk] Monte Carlo simülasyonu çalıştırılamadı: {e}")
+
+# Simülasyon sonunda ağırlık logunu kaydet
+with open('weight_log.json', 'w', encoding='utf-8') as f:
+    json.dump(weight_log, f, ensure_ascii=False, indent=2) 
