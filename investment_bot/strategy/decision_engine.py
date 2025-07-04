@@ -306,7 +306,7 @@ def decide_with_prediction(tech_score, pred_6m, pred_1y, current_price, sector_s
         pred_score = pred_score / (2 if (pred_6m is not None and pred_1y is not None) else 1)
     total_score = score + pred_weight * pred_score
     # Sadece güçlü sinyal ve sektör skoru yüksekse al
-    if sector_score is not None and strong_signal_filter(score, pred_score, sector_score, tech_thresh=buy_threshold, pred_thresh=0.05, sector_thresh=sector_thresh):
+    if sector_score is not None and strong_signal_filter(score, pred_score, sector_score, tech_thresh=buy_threshold, pred_thresh=0, sector_thresh=0):
         return 'buy'
     elif total_score < sell_threshold:
         return 'sell'

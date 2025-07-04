@@ -7,6 +7,9 @@ from django.contrib import messages
 from .utils import get_bist_price
 from django.views import View
 import os
+from django.views.decorators.http import require_POST
+from django.http import HttpResponseRedirect
+from django.urls import reverse
 
 # Create your views here.
 
@@ -146,6 +149,7 @@ def portfolio_view(request):
         profit = (current_price - item.avg_buy_price) * item.quantity
         total_value += value
         total_profit += profit
+        total_paid = item.quantity * item.avg_buy_price
         portfolio_data.append({
             'symbol': item.symbol,
             'quantity': item.quantity,
@@ -153,6 +157,7 @@ def portfolio_view(request):
             'current_price': current_price,
             'value': value,
             'profit': profit,
+            'total_paid': total_paid,
         })
     balance = Balance.objects.first()
     return render(request, 'dashboard/portfolio.html', {
@@ -180,6 +185,9 @@ def home_view(request):
             continue  # Fiyatı çekilemeyen hisseleri atla
         value = item.quantity * current_price
         profit = (current_price - item.avg_buy_price) * item.quantity
+        total_value = value
+        total_profit = profit
+        total_paid = item.quantity * item.avg_buy_price
         portfolio_data.append({
             'symbol': item.symbol,
             'quantity': item.quantity,
@@ -187,6 +195,7 @@ def home_view(request):
             'current_price': current_price,
             'value': value,
             'profit': profit,
+            'total_paid': total_paid,
         })
     # Risk dağılımı (her hissenin portföydeki oranı)
     total_value = sum(item['value'] for item in portfolio_data)
@@ -233,3 +242,50 @@ def home_view(request):
         'top3_scores': top3_scores,
         'mover_score': mover_score,
     })
+
+# Yeni: Bakiyeyi sıfırla (100000 TL yap)
+def reset_balance(request):
+    balance = Balance.objects.first()
+    if balance:
+        balance.amount = 100000.0
+        balance.save()
+    else:
+        Balance.objects.create(amount=100000.0)
+    return redirect('portfolio')
+
+# Yeni: Portföyden hisse sil (sat) ve bakiyeyi güncelle
+@require_POST
+def delete_stock(request, symbol):
+    try:
+        portfolio = Portfolio.objects.get(symbol=symbol)
+        current_price = get_bist_price(symbol)
+        if current_price is not None:
+            balance = Balance.objects.first()
+            refund = portfolio.quantity * current_price
+            if balance:
+                balance.amount += refund
+                balance.save()
+            Trade.objects.create(symbol=symbol, trade_type='SELL', quantity=portfolio.quantity, price=current_price, profit_loss=(current_price-portfolio.avg_buy_price)*portfolio.quantity, is_bot=False)
+        portfolio.delete()
+    except Portfolio.DoesNotExist:
+        pass
+    return redirect('portfolio')
+
+# Tüm portföyü sat
+@require_POST
+def sell_all_stocks(request):
+    portfolio = Portfolio.objects.all()
+    balance = Balance.objects.first()
+    total_sold = 0
+    for item in portfolio:
+        current_price = get_bist_price(item.symbol)
+        if current_price is not None:
+            refund = item.quantity * current_price
+            if balance:
+                balance.amount += refund
+                balance.save()
+            Trade.objects.create(symbol=item.symbol, trade_type='SELL', quantity=item.quantity, price=current_price, profit_loss=(current_price-item.avg_buy_price)*item.quantity, is_bot=False)
+            total_sold += refund
+        item.delete()
+    messages.success(request, f"Tüm hisseler satıldı. Toplam: {total_sold:.2f} TL")
+    return redirect('portfolio')

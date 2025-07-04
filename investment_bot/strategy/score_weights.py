@@ -47,7 +47,7 @@ def rolling_weight_update(log_df, indicator_columns, window=60):
     new_weights = new_weights / new_weights.sum()
     return dict(zip(indicator_columns, new_weights)) 
 
-def strong_signal_filter(tech_score, pred_score, sector_score, tech_thresh=1.0, pred_thresh=0.05, sector_thresh=0.7):
+def strong_signal_filter(tech_score, pred_score, sector_score, tech_thresh: float = 1.0, pred_thresh: float = 0.05, sector_thresh: float = 0.7):
     """
     Hem teknik skor, hem tahmin, hem sektör skoru yüksekse True döner.
     """

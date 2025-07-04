@@ -472,7 +472,7 @@ class TradeExecutor:
         self.portfolio_manager = portfolio_manager
         self.commission = config.get('commission', 0.001)  # %0.1 örnek
 
-    def execute(self, decisions, step_data):
+    def execute(self, decisions, step_data, scores=None):
         """
         Buy/sell/hold kararlarını uygular, portföyü günceller.
         Kademeli alım ve kademeli satış uygular.
@@ -480,12 +480,17 @@ class TradeExecutor:
         for ticker, action in decisions.items():
             price = step_data.get(ticker, {}).get('Close', 0)
             pos = self.portfolio_manager.get_position(ticker)
-            max_position_pct = self.config.get('max_position_pct', 0.07)
-            max_open_positions = self.config.get('max_open_positions', 5)
             portfolio_value = self.portfolio_manager.get_portfolio_value(step_data)
             # Kademeli alım
             if action == 'buy' and self.portfolio_manager.cash > price:
-                # Pozisyon büyüklüğü portföyün max_position_pct'ini aşmasın
+                # Sadece çok uygun hisse için %10'a kadar alım
+                total_score = 0
+                if scores and ticker in scores and 'total' in scores[ticker]:
+                    total_score = scores[ticker]['total']
+                if total_score >= 3.5:
+                    max_position_pct = 0.10
+                else:
+                    max_position_pct = 0.03
                 max_amount = (portfolio_value * max_position_pct) / price
                 amount = self.config.get('trade_size', 1)
                 new_amount = min(pos['amount'] + amount, max_amount)
@@ -665,7 +670,7 @@ class SimulationEngine:
                         scores[ticker]['technical'] += gemini_sector_scores[sector]['score'] / 100.0  # normalize etki
             total_scores = {t: v['total'] for t, v in scores.items()}
             decisions = self.decision_engine.decide(scores, regime, strategy, step_data, self.sector_scores)
-            self.trade_executor.execute(decisions, step_data)
+            self.trade_executor.execute(decisions, step_data, scores)
             self.portfolio_manager.update(date, step_data)
             self.logger.log(date, 'STEP', {'regime': regime, 'strategy': strategy, 'scores': scores, 'decisions': decisions})
         portfolio_history = self.portfolio_manager.history
