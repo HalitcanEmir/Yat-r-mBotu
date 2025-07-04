@@ -17,8 +17,7 @@ def dynamic_indicator_weighting(log_df):
     return indicator_weights.to_dict()
 
 # Global ağırlık güncelleme fonksiyonu (örnek)
-def update_global_weights_from_log(log_path, global_weights):
-    log_df = pd.read_csv(log_path)
+def update_global_weights_from_log(log_df, global_weights):
     new_weights = dynamic_indicator_weighting(log_df)
     for k, v in new_weights.items():
         if k in global_weights:

@@ -1,6 +1,7 @@
 # Portfolio manager implementation will go here 
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 def simulate_buy_sell(*args, **kwargs):
     pass  # Logic handled in backtest.py for now 
@@ -62,9 +63,14 @@ def plot_portfolio_risk(portfolio, price_data, risk_data=None):
     """
     labels = list(portfolio.keys())
     values = [portfolio[t]['stock'] * price_data[t] for t in labels]
+    # Eğer risk_data varsa, risk ile çarp
     if risk_data:
         risks = [risk_data.get(t, 1) for t in labels]
         values = [v * r for v, r in zip(values, risks)]
+    # Tüm değerler sıfır veya NaN ise grafik çizme
+    if not any(np.isfinite(values)) or np.nansum(values) == 0:
+        print("Portföyde gösterilecek hisse yok, risk grafiği çizilmiyor.")
+        return
     plt.figure(figsize=(8, 5))
     plt.pie(values, labels=labels, autopct='%1.1f%%', startangle=140)
     plt.title('Portföy Risk Dağılımı')
