@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Hisse Al / Sat</h2>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="symbol" class="form-label">Hisse Sembolü (örn: THYAO)</label>
+            <input type="text" class="form-control" id="symbol" name="symbol" required>
+        </div>
+        <div class="mb-3">
+            <label for="quantity" class="form-label">Adet</label>
+            <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
+        </div>
+        <div class="mb-3">
+            <label for="trade_type" class="form-label">İşlem Tipi</label>
+            <select class="form-select" id="trade_type" name="trade_type">
+                <option value="BUY">Al</option>
+                <option value="SELL">Sat</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">İşlemi Gerçekleştir</button>
+    </form>
+</div>
+{% endblock %} 

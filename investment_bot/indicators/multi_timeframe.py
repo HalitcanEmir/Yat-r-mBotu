@@ -1,0 +1,1 @@
+# Multi-timeframe EMA indicator implementation will go here 

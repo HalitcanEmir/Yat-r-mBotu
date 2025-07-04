@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .views import BuySellView
 
 urlpatterns = [
     path('', views.dashboard_home, name='dashboard_home'),
@@ -9,4 +10,5 @@ urlpatterns = [
     path('api/portfolio_series/', views.api_portfolio_timeseries, name='api_portfolio_timeseries'),
     path('api/recent_trades/', views.api_recent_trades, name='api_recent_trades'),
     path('api/all_trades/', views.api_all_trades, name='api_all_trades'),
+    path('buy-sell/', BuySellView.as_view(), name='buy_sell'),
 ] 

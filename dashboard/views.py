@@ -1,8 +1,11 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.http import JsonResponse
-from .models import PortfolioSnapshot, Trade, Indicator
+from .models import Trade, Portfolio, Balance
 from django.utils import timezone
 import json
+from django.contrib import messages
+from .utils import get_bist_price
+from django.views import View
 
 # Create your views here.
 
@@ -75,3 +78,60 @@ def api_all_trades(request):
         } for t in trades
     ]
     return JsonResponse({'trades': data})
+
+class BuySellView(View):
+    template_name = 'dashboard/buy_sell.html'
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+    def post(self, request):
+        symbol = request.POST.get('symbol', '').upper()
+        quantity = int(request.POST.get('quantity', 0))
+        trade_type = request.POST.get('trade_type', 'BUY')
+        price = get_bist_price(symbol)
+        if not price:
+            messages.error(request, f"{symbol} için fiyat alınamadı.")
+            return render(request, self.template_name)
+        # Bakiye ve portföy kontrolü
+        balance = Balance.objects.first()
+        if not balance:
+            balance = Balance.objects.create(amount=100000.0)
+        if trade_type == 'BUY':
+            total_cost = price * quantity
+            if balance.amount < total_cost:
+                messages.error(request, "Yetersiz bakiye.")
+                return render(request, self.template_name)
+            # Portföyde var mı?
+            portfolio, created = Portfolio.objects.get_or_create(symbol=symbol, defaults={'quantity': 0, 'avg_buy_price': 0.0})
+            new_total = portfolio.quantity + quantity
+            new_avg = ((portfolio.quantity * portfolio.avg_buy_price) + (quantity * price)) / new_total if new_total > 0 else price
+            portfolio.quantity = new_total
+            portfolio.avg_buy_price = new_avg
+            portfolio.save()
+            balance.amount -= total_cost
+            balance.save()
+            Trade.objects.create(symbol=symbol, trade_type='BUY', quantity=quantity, price=price, is_bot=False)
+            messages.success(request, f"{quantity} adet {symbol} alındı.")
+        elif trade_type == 'SELL':
+            try:
+                portfolio = Portfolio.objects.get(symbol=symbol)
+            except Portfolio.DoesNotExist:
+                messages.error(request, "Portföyde bu hisse yok.")
+                return render(request, self.template_name)
+            if portfolio.quantity < quantity:
+                messages.error(request, "Yeterli hisse yok.")
+                return render(request, self.template_name)
+            profit_loss = (price - portfolio.avg_buy_price) * quantity
+            portfolio.quantity -= quantity
+            if portfolio.quantity == 0:
+                portfolio.delete()
+            else:
+                portfolio.save()
+            balance.amount += price * quantity
+            balance.save()
+            Trade.objects.create(symbol=symbol, trade_type='SELL', quantity=quantity, price=price, profit_loss=profit_loss, is_bot=False)
+            messages.success(request, f"{quantity} adet {symbol} satıldı. Kar/Zarar: {profit_loss:.2f} TL")
+        else:
+            messages.error(request, "Geçersiz işlem tipi.")
+        return redirect('buy_sell')
